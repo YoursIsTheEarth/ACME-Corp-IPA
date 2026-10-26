@@ -57,14 +57,19 @@ flowchart LR
 
 ### Key decisions and tradeoffs
 
+The full reasoning for each decision is in [docs/design.md](docs/design.md).
+
 - **The LLM reads and reasons; code decides about money.** Stock, arithmetic, duplicates, and approval limits are deterministic Python, so outcomes are testable and repeatable. A CRITICAL finding forces a rejection the LLM can explain but not override, and the LLM may make an outcome stricter but never looser. This is also why the prompt-injection invoice (INV-1017) cannot talk its way to an approval.
 - **A real LLM, not a simulation.** The case says to simulate everything locally. We kept payment and inventory local but run the agents on Grok (or Claude), because a scripted model would only show that the plumbing works. The cost is that processing needs an API key. Without one, the app says so plainly and processes nothing (see below).
 - **Fail closed and hold rather than guess.** A failed extraction, an unreachable model, or an ambiguous case never produces a payment. It ends rejected or held, with the reason shown.
 - **Pay in batches, not inside the agent run.** Approval only queues a payment. Payment timing (delay, end of day, or when the queue is empty) is set on the Admin page, so finance controls when money moves.
-- **Tested without the network.** About 980 tests (backend, frontend, and Playwright end-to-end) run on a deterministic fake model that no setting can select in production. A 26-file golden suite pins the expected outcome of every sample invoice.
+- **Rounding goes to review, real math errors are rejected.** A line, subtotal, or total off by $0.01 to $1.00 (`MATH_ROUNDING_TOLERANCE_USD`) is held for a person to check. A larger difference is rejected as `MATH_MISMATCH`.
+- **Implausible addresses are held, even on the "clean" INV-1004.** The LLM judges whether a remit-to address is credible. INV-1004's "742 Evergreen Terrace" is the Simpsons' house, and Grok flags it on every live run. We kept that judgment rather than tune it to the case's answer key, so live runs hold INV-1004 for review (see [docs/design.md §7](docs/design.md#7-suspicious-addresses-are-judged-by-the-llm-and-inv-1004-is-held)).
+- **Tested without the network.** About 990 tests (backend, frontend, and Playwright end-to-end) run on a deterministic fake model that no setting can select in production. A 26-file golden suite pins the expected outcome of every sample invoice.
 
 ### What was cut, and known limits
 
+- **Stock is checked per invoice, not across invoices.** Each invoice is compared with stock on hand, but approved and paid invoices do not reserve or reduce it. We cut this to keep the sample invoices independently testable; the six invoices paid in the sample run together bill 47 WidgetA against 15 in stock. A real product must track quantities already invoiced against inventory so Acme is never charged for more goods than it has.
 - No real email intake, bank API, login, or cloud deployment, as the case allows.
 - No OCR: an image-only PDF fails closed. All the provided PDFs have a text layer.
 - Reviewer names are typed by hand, with no authentication.
@@ -136,7 +141,7 @@ Six fraud cases (INV-1017 to INV-1022, February 2026) were added to the 20 origi
 | `invoice_1018.txt`, `invoice_1019.json`, `invoice_1020.csv` | Split invoicing: Northwind Fabrication LLC bills $9,750.00, $9,500.00, and $9,750.00 within 15 days, each under the $10,000 VP threshold (INV-1020 spells it "Northwind Fabrication, LLC") | INV-1018 is approved and queued, then pulled from the Payment Queue into review when INV-1019 arrives; all three held with `PAYEE_CUMULATIVE_THRESHOLD` (payee total $29,000.00) |
 | `invoice_1021.txt`, `invoice_1022.json` | Shared remit-to address: Harbor Point Supply Co. ($6,000.00) and HPS Industrial Partners ($5,250.00) at "88 Harbor View Rd/Road, Unit 4, Tacoma" | INV-1021 is approved and queued, then pulled into review; both held with `PAYEE_CUMULATIVE_THRESHOLD` ($11,250.00, matched by address) |
 
-With all 26 files and the default payment timing, `python main.py --batch data/invoices --pay` ends with 7 paid, 1 superseded, 6 held, and 12 rejected (3 duplicates), one batch of $37,620.00. With delay off, INV-1018 and INV-1021 are paid at approval and flagged afterwards in their audit trail: 9 paid, 1 revised, 4 held, 12 rejected, $53,370.00 paid.
+With all 26 files and the default payment timing, the golden test suite (scripted model) ends with 7 paid, 1 superseded, 6 held, and 12 rejected (3 duplicates), one batch of $37,620.00. A live Grok run of `python main.py --batch data/invoices --pay` also holds INV-1004 and its revision for the implausible address (see Key decisions): 6 paid, 7 held, $31,680.00. The output of a live run is in [docs/sample-run/](docs/sample-run/). With delay off, INV-1018 and INV-1021 are paid at approval and flagged afterwards in their audit trail: 9 paid, 1 revised, 4 held, 12 rejected, $53,370.00 paid.
 
 ### Mock Inventory Database (Required Setup)
 

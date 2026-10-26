@@ -1,0 +1,195 @@
+Seeded an empty acme.db with the reference inventory and vendors.
+[1/26] invoice_1001.txt
+  > Extracting
+  > Validating
+  > Deciding
+  -> APPROVE (Queued for payment)  run run-b71a9de56820
+[2/26] invoice_1002.txt
+  > Extracting
+  > Validating
+  > Deciding
+  -> REJECT (Rejected)  run run-540f21f34eab
+[3/26] invoice_1003.txt
+  > Extracting
+  > Validating
+  > Deciding
+  -> REJECT (Rejected)  run run-abe0f05b898a
+[4/26] invoice_1004.json
+  > Extracting
+  > Validating
+  > Deciding
+  -> NEEDS_REVIEW (Awaiting review)  run run-d298e334171a
+[5/26] invoice_1004_revised.json
+  > Extracting
+  > Validating
+  > Deciding
+  -> NEEDS_REVIEW (Awaiting review)  run run-227f18f5397d
+[6/26] invoice_1005.json
+  > Extracting
+  > Validating
+  > Deciding
+  -> REJECT (Rejected)  run run-ade64b917069
+[7/26] invoice_1006.csv
+  > Extracting
+  > Validating
+  > Deciding
+  -> APPROVE (Queued for payment)  run run-78d1d527f19a
+[8/26] invoice_1007.csv
+  > Extracting
+  > Validating
+  > Deciding
+  -> REJECT (Rejected)  run run-5839dee2a303
+[9/26] invoice_1008.txt
+  > Extracting
+  > Validating
+  > Deciding
+  -> REJECT (Rejected)  run run-9df2b5e72cfa
+[10/26] invoice_1009.json
+  > Extracting
+  > Validating
+  > Deciding
+  -> REJECT (Rejected)  run run-c603f177448f
+[11/26] invoice_1010.txt
+  > Extracting
+  > Validating
+  > Deciding
+  -> NEEDS_REVIEW (Awaiting review)  run run-5f393ffc86db
+[12/26] invoice_1011.pdf
+  > Extracting
+  > Validating
+  > Deciding
+  -> APPROVE (Queued for payment)  run run-33deb0d30284
+[13/26] invoice_1011.txt
+  > Extracting
+  > Validating
+  > Deciding
+  -> REJECT (Duplicate)  run run-a4cb0746e392
+[14/26] invoice_1012.pdf
+  > Extracting
+  > Validating
+  > Deciding
+  -> APPROVE (Queued for payment)  run run-60523e595a1f
+[15/26] invoice_1012.txt
+  > Extracting
+  > Validating
+  > Deciding
+  -> REJECT (Duplicate)  run run-15fcd5475386
+[16/26] invoice_1013.json
+  > Extracting
+  > Validating
+  > Deciding
+  -> REJECT (Rejected)  run run-8c6f2953b5b2
+[17/26] invoice_1013.pdf
+  > Extracting
+  > Validating
+  > Deciding
+  -> REJECT (Duplicate)  run run-252b0f4bb4fc
+[18/26] invoice_1014.xml
+  > Extracting
+  > Validating
+  > Deciding
+  -> APPROVE (Queued for payment)  run run-6e19b816ad0a
+[19/26] invoice_1015.csv
+  > Extracting
+  > Validating
+  > Deciding
+  -> APPROVE (Queued for payment)  run run-cae44633c45f
+[20/26] invoice_1016.json
+  > Extracting
+  > Validating
+  > Deciding
+  -> REJECT (Rejected)  run run-b6059be902fd
+[21/26] invoice_1017.txt
+  > Extracting
+  > Validating
+  > Deciding
+  -> REJECT (Rejected)  run run-cb11c368545e
+[22/26] invoice_1018.txt
+  > Extracting
+  > Validating
+  > Deciding
+  -> APPROVE (Queued for payment)  run run-fb02e705615f
+[23/26] invoice_1019.json
+  > Extracting
+  > Validating
+  > Deciding
+  -> NEEDS_REVIEW (Awaiting review)  run run-3dd9f230c70d
+[24/26] invoice_1020.csv
+  > Extracting
+  > Validating
+  > Deciding
+  -> NEEDS_REVIEW (Awaiting review)  run run-ce2437166dd8
+[25/26] invoice_1021.txt
+  > Extracting
+  > Validating
+  > Deciding
+  -> APPROVE (Queued for payment)  run run-dd55954b3559
+[26/26] invoice_1022.json
+  > Extracting
+  > Validating
+  > Deciding
+  -> NEEDS_REVIEW (Awaiting review)  run run-f71f5f162d05
+Results
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ File                      ┃ Invoice # ┃ Vendor                       ┃ Amount (USD) ┃ Outcome      ┃ Status             ┃ Key findings                       ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ invoice_1001.txt          │ INV-1001  │ Widgets Inc.                 │     5,000.00 │ APPROVE      │ Queued for payment │                                    │
+│ invoice_1002.txt          │ INV-1002  │ Gadgets Co.                  │    15,000.00 │ REJECT       │ Rejected           │ STOCK_EXCEEDED                     │
+│ invoice_1003.txt          │ INV-1003  │ Fraudster LLC                │   100,000.00 │ REJECT       │ Rejected           │ FRAUD_SUSPECTED, INVALID_DUE_DATE, │
+│                           │           │                              │              │              │                    │ UNKNOWN_VENDOR, ZERO_STOCK         │
+│ invoice_1004.json         │ INV-1004  │ Precision Parts Ltd.         │     1,890.00 │ NEEDS_REVIEW │ Awaiting review    │ SUSPICIOUS_ADDRESS                 │
+│ invoice_1004_revised.json │ INV-1004  │ Precision Parts Ltd.         │     5,940.00 │ NEEDS_REVIEW │ Awaiting review    │ SUSPICIOUS_ADDRESS                 │
+│ invoice_1005.json         │ INV-1005  │ Global Supply Chain Partners │    15,225.00 │ REJECT       │ Rejected           │ STOCK_EXCEEDED, SUSPICIOUS_ADDRESS │
+│ invoice_1006.csv          │ INV-1006  │ Acme Industrial Supplies     │     2,750.00 │ APPROVE      │ Queued for payment │                                    │
+│ invoice_1007.csv          │ INV-1007  │ MegaWidgets Corp             │    15,525.00 │ REJECT       │ Rejected           │ MATH_MISMATCH, STOCK_EXCEEDED      │
+│ invoice_1008.txt          │ INV-1008  │ NoProd Industries            │     9,900.00 │ REJECT       │ Rejected           │ UNKNOWN_ITEM, UNKNOWN_VENDOR       │
+│ invoice_1009.json         │ INV-1009  │ -                            │      -250.00 │ REJECT       │ Rejected           │ INVALID_QUANTITY, MATH_MISMATCH,   │
+│                           │           │                              │              │              │                    │ MISSING_DUE_DATE, MISSING_VENDOR   │
+│ invoice_1010.txt          │ INV-1010  │ Consolidated Materials Group │     7,185.00 │ NEEDS_REVIEW │ Awaiting review    │ PRICE_VARIANCE                     │
+│ invoice_1011.pdf          │ INV-1011  │ Summit Manufacturing Co.     │     3,000.00 │ APPROVE      │ Queued for payment │                                    │
+│ invoice_1011.txt          │ INV-1011  │ Summit Manufacturing Co.     │     3,000.00 │ REJECT       │ Duplicate          │ DUPLICATE                          │
+│ invoice_1012.pdf          │ INV-1012  │ QuickShip Distributers       │     9,975.00 │ APPROVE      │ Queued for payment │ NEAR_THRESHOLD                     │
+│ invoice_1012.txt          │ INV-1012  │ QuickShip Distributers       │     9,975.00 │ REJECT       │ Duplicate          │ DUPLICATE                          │
+│ invoice_1013.json         │ INV-1013  │ Atlas Industrial Supply      │    22,562.80 │ REJECT       │ Rejected           │ MATH_MISMATCH, STOCK_EXCEEDED      │
+│ invoice_1013.pdf          │ INV-1013  │ Atlas Industrial Supply      │    22,562.80 │ REJECT       │ Duplicate          │ DUPLICATE, MATH_MISMATCH,          │
+│                           │           │                              │              │              │                    │ STOCK_EXCEEDED                     │
+│ invoice_1014.xml          │ INV-1014  │ TechParts International      │     4,455.00 │ APPROVE      │ Queued for payment │ CURRENCY_CONVERTED                 │
+│ invoice_1015.csv          │ INV-1015  │ Reliable Components Inc.     │     6,500.00 │ APPROVE      │ Queued for payment │                                    │
+│ invoice_1016.json         │ INV-1016  │ Widgets Inc.                 │     3,233.00 │ REJECT       │ Rejected           │ UNKNOWN_ITEM                       │
+│ invoice_1017.txt          │ INV-1017  │ Apex Procurement Services    │    15,500.00 │ REJECT       │ Rejected           │ FRAUD_SUSPECTED, PRICE_VARIANCE,   │
+│                           │           │                              │              │              │                    │ PROMPT_INJECTION_SUSPECTED,        │
+│                           │           │                              │              │              │                    │ UNKNOWN_VENDOR                     │
+│ invoice_1018.txt          │ INV-1018  │ Northwind Fabrication LLC    │     9,750.00 │ APPROVE      │ Queued for payment │ NEAR_THRESHOLD                     │
+│ invoice_1019.json         │ INV-1019  │ Northwind Fabrication LLC    │     9,500.00 │ NEEDS_REVIEW │ Awaiting review    │ PAYEE_CUMULATIVE_THRESHOLD         │
+│ invoice_1020.csv          │ INV-1020  │ Northwind Fabrication, LLC   │     9,750.00 │ NEEDS_REVIEW │ Awaiting review    │ PAYEE_CUMULATIVE_THRESHOLD         │
+│ invoice_1021.txt          │ INV-1021  │ Harbor Point Supply Co.      │     6,000.00 │ APPROVE      │ Queued for payment │                                    │
+│ invoice_1022.json         │ INV-1022  │ HPS Industrial Partners      │     5,250.00 │ NEEDS_REVIEW │ Awaiting review    │ PAYEE_CUMULATIVE_THRESHOLD         │
+└───────────────────────────┴───────────┴──────────────────────────────┴──────────────┴──────────────┴────────────────────┴────────────────────────────────────┘
+Paid 5000.00 to Widgets Inc.
+Paid 2750.00 to Acme Industrial Supplies
+Paid 3000.00 to Summit Manufacturing Co.
+Paid 9975.00 to QuickShip Distributers
+Paid 4455.00 to TechParts International
+Paid 6500.00 to Reliable Components Inc.
+Payment batch B-0001: 6 paid, total $31,680.00, 0 failed (released by cli)
+# Invoice batch summary
+
+| Outcome | Count |
+| --- | ---: |
+| Invoices processed | 26 |
+| Paid | 6 |
+| Queued for payment | 0 |
+| Superseded | 1 |
+| Revised | 0 |
+| Credit confirmed | 0 |
+| Held for review | 7 |
+| Rejected | 12 |
+| Duplicates caught | 3 |
+
+| Dollars (USD) | Amount |
+| --- | ---: |
+| Queued | $0.00 |
+| Paid | $31,680.00 |
+| Blocked (rejected or held) | $285,608.60 |
+
+Summary written to reports/summary.md
