@@ -39,6 +39,9 @@ export const NAV_ITEMS: NavItem[] = [
   { path: '/payments', label: 'Payments', icon: 'payments' },
 ];
 
+/** Pinned near the bottom of the sidebar, apart from the main menu, above the provider footer. No badge. */
+export const ADMIN_ITEMS: NavItem[] = [{ path: '/admin', label: 'Admin', icon: 'admin_panel_settings' }];
+
 const PROVIDER_LABELS: Record<string, string> = { grok: 'Grok', claude: 'Claude' };
 
 @Component({
@@ -75,6 +78,7 @@ export class ShellComponent implements OnInit {
   @ViewChild('nav') nav?: MatSidenav;
 
   readonly items = NAV_ITEMS;
+  readonly adminItems = ADMIN_ITEMS;
   readonly narrow = toSignal(
     inject(BreakpointObserver)
       .observe(NARROW_QUERY)

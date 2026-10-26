@@ -3,10 +3,11 @@ from decimal import Decimal
 
 import pytest
 
+from acme.admin import PaymentTiming, save_payment_timing
 from acme.logging import read_trace
 from acme.payments import (BatchAlreadyRunning, InvalidBatchRequest, is_batch_running, mock_bank,
-                           recover_interrupted_batch, resume_payment_failure, review_hold, run_batch,
-                           supersede_original, queue_payment, record_processed)
+                           pay_now_if_immediate, recover_interrupted_batch, resume_payment_failure, review_hold,
+                           run_batch, supersede_original, queue_payment, record_processed)
 from acme.payments._store import BATCH_LOCK
 from acme.models import Outcome
 from acme.settings import get_settings
@@ -334,3 +335,113 @@ def test_revision_lock_timeout_falls_back_to_review(pdb, golden, monkeypatch):
     assert result.action == "held" and review_hold("r-1004r").kind == "warning"
     assert run_row(pdb, "r-1004r")["status"] == "Awaiting review"
     assert [r["run_id"] for r in queue_rows(pdb)] == ["r-1004"]
+
+
+# --- immediate trigger (add-admin-payment-settings 2.2, 2.3) ---------------------------------------
+
+def test_fixtures_run_with_the_default_timing(pdb):
+    """Shared payment fixtures keep the defaults (delay on), so the batch tests above keep their meaning."""
+    from acme.admin import load_payment_timing
+    assert load_payment_timing(pdb) == PaymentTiming() and load_payment_timing(pdb).delay_payments
+
+
+def delay_off():
+    """Immediate mode, set explicitly (the default is delay on). Nothing is queued yet, so nothing is paid."""
+    save_payment_timing(PaymentTiming(delay_payments=False), "Dana")
+
+
+def batches(conn):
+    return [dict(r) for r in conn.execute("SELECT * FROM payment_batches ORDER BY batch_id")]
+
+
+def backdate_attempts(conn):
+    """Every earlier batch finished long ago, so failed rows are past the PAYMENT_IDLE_DELAY_S wait."""
+    conn.execute("UPDATE payment_batches SET started_at = '2000-01-01T00:00:00+00:00', "
+                 "finished_at = '2000-01-01T00:00:00+00:00'")
+    conn.commit()
+
+
+def test_immediate_batch_record(pdb, golden, bank):
+    approve(pdb, "r-1001", golden["invoice_1001.txt"])
+    result = run_batch("immediate", "Dana")
+    assert (result.trigger, result.released_by, result.count, result.total_usd) == (
+        "immediate", "System", 1, Decimal("5000.00"))
+    [batch] = batches(pdb)
+    assert (batch["trigger"], batch["released_by"], batch["count"], batch["total_usd"], batch["failed_count"]) == (
+        "immediate", "System", 1, "5000.00", 0)
+    assert run_row(pdb, "r-1001")["final_status"] == "Paid"
+
+
+def test_immediate_scope_skips_a_just_failed_row_then_retries_it(pdb, golden, bank):
+    delay_off()
+    failing = approve(pdb, "r-1001", golden["invoice_1001.txt"]).row_id
+    mock_bank.fail_next(1, "bank timeout")
+    assert run_batch("immediate").results[0].status == "failed"
+    assert len(batches(pdb)) == 1  # the drain does not retry a row that just failed
+
+    approve(pdb, "r-1006", golden["invoice_1006.csv"])
+    second = run_batch("immediate")
+    assert [(r.invoice_number, r.status) for r in second.results] == [("INV-1006", "paid")]
+    assert queue_rows(pdb, "r-1001")[0]["status"] == "failed"
+
+    backdate_attempts(pdb)
+    third = run_batch("immediate")
+    assert [(r.row_id, r.status) for r in third.results] == [(failing, "paid")]
+    assert [v for v, _ in bank] == ["Widgets Inc.", "Acme Industrial Supplies", "Widgets Inc."]
+    assert run_row(pdb, "r-1001")["final_status"] == "Paid"
+
+
+def test_immediate_third_failure_escalates(pdb, golden, bank):
+    delay_off()
+    approve(pdb, "r-1001", golden["invoice_1001.txt"])
+    for attempt in (1, 2, 3):
+        backdate_attempts(pdb)
+        mock_bank.fail_next(1, "bank down")
+        result = run_batch("immediate")
+        assert result.results[0].status == ("escalated" if attempt == 3 else "failed")
+    row = queue_rows(pdb)[0]
+    assert (row["status"], row["attempts"]) == ("cancelled", 3)
+    assert run_row(pdb, "r-1001")["status"] == "Awaiting review"
+    assert review_hold("r-1001").kind == "payment_failure"
+    backdate_attempts(pdb)
+    assert pay_now_if_immediate() is None  # no longer payable by any batch
+    assert run_batch("pay_all", "Dana").results == [] and payments(pdb) == []
+
+
+def test_pay_now_if_immediate_needs_delay_off_and_a_payable_row(pdb, golden, bank):
+    approve(pdb, "r-1001", golden["invoice_1001.txt"])
+    assert pay_now_if_immediate() is None and bank == []  # default: delay on
+    save_payment_timing(PaymentTiming(delay_payments=False), "Dana", pay_queued=False)
+    result = pay_now_if_immediate()
+    assert (result.trigger, result.count) == ("immediate", 1)
+    assert pay_now_if_immediate() is None  # nothing left: no empty batch is recorded
+    assert len(batches(pdb)) == 1
+
+
+def test_pay_now_if_immediate_during_a_batch_returns_none(pdb, golden, bank):
+    delay_off()
+    approve(pdb, "r-1001", golden["invoice_1001.txt"])
+    with BATCH_LOCK:
+        assert pay_now_if_immediate() is None
+    assert queue_rows(pdb)[0]["status"] == "queued" and bank == []
+
+
+def test_row_approved_during_pay_all_is_paid_right_after(pdb, golden, bank, monkeypatch):
+    delay_off()
+    approve(pdb, "r-1001", golden["invoice_1001.txt"])
+    gate = Gate(monkeypatch, bank)
+    thread, box = in_thread(run_batch, "pay_all", "Dana")
+    assert gate.started.wait(5)
+    approve(pdb, "r-1006", golden["invoice_1006.csv"])
+    assert pay_now_if_immediate() is None  # Pay all holds the lock: the row stays queued
+    assert queue_rows(pdb, "r-1006")[0]["status"] == "queued"
+    gate.release.set()
+    thread.join(10)
+    assert "error" not in box and box["result"].count == 1
+    pay_all, drain = batches(pdb)
+    assert (pay_all["trigger"], pay_all["count"]) == ("pay_all", 1)
+    assert (drain["trigger"], drain["released_by"], drain["count"], drain["total_usd"]) == (
+        "immediate", "System", 1, "2750.00")
+    assert drain["started_at"] >= pay_all["finished_at"]  # never concurrent
+    assert run_row(pdb, "r-1006")["final_status"] == "Paid"
+    assert [r["batch_id"] for r in payments(pdb)] == [pay_all["batch_id"], drain["batch_id"]]

@@ -94,10 +94,10 @@ Invoice text SHALL be treated as data in every LLM call. Instructions embedded i
 - **THEN** the outcome is REJECT with `UNKNOWN_ITEM`
 
 ### Requirement: Golden outcomes for the provided files
-Processing all 20 files in `data/invoices/` in sorted filename order with the test-only fake model standing in for the LLM provider, followed by one payment batch, SHALL produce the outcome, paid amount, and key finding codes listed for each file in the Full golden batch scenario (F20).
+Processing all 20 files in `data/invoices/` in sorted filename order with the test-only fake model standing in for the LLM provider and the default payment timing (delay on, pay at end of day off, pay when the Invoice Queue is empty on), followed by one payment batch, SHALL produce the outcome, paid amount, and key finding codes listed for each file in the Full golden batch scenario (F20).
 
 #### Scenario: Full golden batch
-- **WHEN** all 20 files are processed in sorted filename order with the test-only fake model and one payment batch runs
+- **WHEN** all 20 files are processed in sorted filename order with the test-only fake model and the default payment timing, and one payment batch runs
 - **THEN** each file's outcome and key finding codes match the table below, the paid amounts match, and the counts are 7 paid, 1 superseded, 1 held, 11 rejected (3 as duplicates)
 
 | File | Outcome | Paid in batch | Key finding codes |
@@ -190,3 +190,16 @@ The workflow SHALL never pay an invoice it cannot extract or verify.
 #### Scenario: Empty file
 - **WHEN** a zero-byte invoice file is processed
 - **THEN** the outcome is REJECT with `EXTRACTION_FAILED`
+
+### Requirement: Golden outcomes with immediate payments
+Processing all 20 files in sorted filename order with the test-only fake model and payment delay explicitly turned off (immediate mode, not the default) SHALL pay each approved invoice as it is approved, with every file's outcome, finding codes, and paid amount as in the delayed golden table except for the INV-1004 pair.
+
+#### Scenario: Full golden run with delay off
+- **WHEN** all 20 files are processed in sorted filename order with payment delay off and no manual batch runs
+- **THEN** invoice_1004.json is PAID $1,890.00 with no `SUPERSEDED_BY_REVISION` finding
+- **AND** invoice_1004_revised.json is Revised with `REVISION` and a $4,050.00 delta payment
+- **AND** the counts are 7 paid, 1 revised, 0 superseded, 1 held, 11 rejected (3 as duplicates), with 8 payments totalling $37,620.00 (EUR at the default 1.08), each made by its own `immediate` batch
+
+#### Scenario: Nothing left to pay
+- **WHEN** a payment batch runs after that golden run
+- **THEN** it pays nothing

@@ -151,6 +151,9 @@ python main.py payments run --released-by Dana                             # nam
 python main.py review                                                      # list invoices awaiting review
 python main.py review <run_id> --decision approve --reviewer "Dana" --rationale "Rush pricing agreed by procurement"
 python main.py --explain <run_id>                                          # replay a run's audit trail
+python main.py admin show                                                  # payment timing and who saved it last
+python main.py admin set --delay-payments off --by Dana                    # pay each invoice at approval
+python main.py admin set --delay-payments on --pay-at-end-of-day on --end-of-day-time 17:00 --end-of-day-timezone America/Chicago --by Dana
 ```
 
 | Flag or command | What it does |
@@ -166,12 +169,25 @@ python main.py --explain <run_id>                                          # rep
 | `payments run` | Run one payment batch now; prints the batch ID, rows paid, total, and failures |
 | `review` | List held invoices with why each is held and the AI recommendation |
 | `review <run_id> --decision approve\|reject --reviewer <name> --rationale <text>` | Decide a held invoice (name 1 to 50 characters, rationale at least 15). The same run resumes and continues to disposition |
+| `admin show` | Print the payment timing (delay, end of day with its time and timezone, pay when the Invoice Queue is empty), what it does, and who saved it last. No LLM key needed |
+| `admin set [--delay-payments on\|off] [--pay-at-end-of-day on\|off] [--end-of-day-time HH:MM] [--end-of-day-timezone <IANA>] [--pay-when-queue-empty on\|off] --by <name>` | Change the payment timing (flags not given keep their value), validated and audited like the Admin page; invalid input exits non-zero and saves nothing. Turning delay off pays everything queued at once. No LLM key needed |
 
-Approved invoices are queued, never paid by the run itself; only a payment batch calls `mock_payment`. At startup the CLI finishes any interrupted payment batch and, when a key is set, re-runs any invoice left mid-pipeline.
+Approved invoices are queued, never paid by the run itself; only a payment batch calls `mock_payment`. The payment timing (`admin show`) decides when: with the default delay on, approved invoices wait in the Payment Queue and are printed as "Queued for payment" until `--pay`, `payments run`, or the web app pays them; with delay off, each approved invoice is paid by its own `immediate` batch before its result is printed, with the payment ID, and `--pay` then finds nothing queued. The batch summary counts Revised (a revision of a paid invoice, delta paid or nothing due) separately from Paid. At startup the CLI finishes any interrupted payment batch and, when a key is set, re-runs any invoice left mid-pipeline.
 
 ## Web app: ACME Corp IPA
 
 An Angular 18 app (`frontend/`) over the FastAPI backend (`backend/`, see "Web API" in `backend/README.md`). Upload invoices on Home, watch them in the Invoice Queue, decide held ones in Invoice Elevated Review, release payments from the Payment Queue, and check outcomes and reasoning in the Resolution Audit and Payments.
+
+Payment timing is set on the **Admin** page (bottom of the sidebar), with no restart:
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Delay payments | On | On: approved invoices wait in the Payment Queue for a batch. Off: each approved invoice (auto-approved, AI VP approved, approved by a reviewer, or a revision delta) is paid at once by an `immediate` batch released by System; a failed payment is retried after `PAYMENT_IDLE_DELAY_S` |
+| Pay at end of day | Off | With delay on: a daily `end_of_day` batch at the time and timezone below |
+| End-of-day time / timezone | 5:00 PM / America/Chicago | Used once Pay at end of day is on; any IANA timezone |
+| Pay when the Invoice Queue is empty | On | With delay on: an `idle` batch once nothing has been processing for `PAYMENT_IDLE_DELAY_S` (60 s); invoices awaiting review do not block it |
+
+Saving asks for your name (1 to 50 characters) and is recorded in the audit log with the old and new values. Turning delay off pays everything already queued in one `immediate` batch; turning it back on pays nothing and later approvals wait again. The Payment Queue header shows the current mode and links to Admin; Pay all, Pay selected, and Pay now work in both modes. The same settings are available from the CLI (`admin show`, `admin set`) and the API (`GET`/`PUT /api/admin/settings`). `PAYMENT_BATCH_TIME`, `PAYMENT_TZ`, and `PAYMENT_AUTO_IDLE` were removed from `.env`; if you set them, re-enter the values on the Admin page. With the defaults there is no daily 5:00 PM batch: turn on Pay at end of day to get it back.
 
 Requirements: Python 3.11+ and Node 20+ (with npm). `uv` is used when present.
 
@@ -187,7 +203,7 @@ make dev                    # FastAPI on :8000 and the web app on http://localho
 | `make dev` | Runs uvicorn and `ng serve` together; `ng serve` proxies `/api` to the backend (`frontend/proxy.conf.json`). With no LLM key it prints a warning naming the variable and still starts both |
 | `make backend` / `make frontend` | Runs one of the two servers |
 | `make test` | Backend pytest suite, then the frontend component tests (headless Chrome) |
-| `make e2e` | Playwright end-to-end run: starts its own backend with the test-only fake model (no key, no LLM calls) on a fresh DB and its own dev server, uploads 3 invoices, approves INV-1010, pays all, and checks Payments |
+| `make e2e` | Playwright end-to-end run: starts its own backend with the test-only fake model (no key, no LLM calls) on a fresh DB and its own dev server, uploads 3 invoices, approves INV-1010, pays all, and checks Payments; then turns delay off on Admin and checks that a newly uploaded invoice is paid at approval |
 
 Optional: `docker compose up` runs the same two services in containers, with the provider and keys from `.env` or the environment; open <http://localhost:4200>.
 

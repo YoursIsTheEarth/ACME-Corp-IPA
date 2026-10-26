@@ -79,6 +79,18 @@ def test_every_client_gets_every_event():
             wait_for(lambda: any(n == "invoice.resolved" and d["run_id"] == run_id for n, d in received))
 
 
+def test_settings_updated_event_carries_the_full_settings():
+    body = {"delay_payments": True, "pay_at_end_of_day": True, "end_of_day_time": "15:00",
+            "end_of_day_timezone": "America/New_York", "pay_when_queue_empty": False, "updated_by": "Dana"}
+    with live_server() as base, sse(base) as first, sse(base) as second, httpx.Client() as http:
+        saved = http.put(f"{base}/api/admin/settings", json=body).json()
+        for received in (first, second):
+            wait_for(lambda: any(n == "settings.updated" for n, _ in received))
+            [data] = [d for n, d in received if n == "settings.updated"]
+            assert data == saved and data["updated_by"] == "Dana" and data["updated_at"]
+            assert {k: data[k] for k in body} == body
+
+
 def test_revision_swap_and_batch_events():
     with live_server() as base, sse(base) as received, httpx.Client() as http:
         ids = dict(zip(SEVEN, post_files(http, base, *SEVEN)))

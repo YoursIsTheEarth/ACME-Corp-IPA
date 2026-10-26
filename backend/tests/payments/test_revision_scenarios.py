@@ -9,6 +9,7 @@ from decimal import Decimal
 
 import pytest
 
+from acme.admin import load_payment_timing
 from acme.approval import apply_policy
 from acme.models import Decision, Outcome
 from acme.payments import (BatchAlreadyRunning, enqueue_review, idle_batch_due, is_batch_running,
@@ -109,7 +110,7 @@ def test_idle_trigger_fires_after_upload_settles(pdb, golden, bank):
 
     def due(at):
         return idle_batch_due(at, load_runs_snapshot(pdb), payable_count(pdb, settings.payment_max_attempts),
-                              is_batch_running(), settings)
+                              is_batch_running(), settings, load_payment_timing(pdb))  # defaults: delay on
     assert not due(now + timedelta(seconds=120))  # r-1006 still extracting
     pdb.execute("UPDATE invoice_runs SET stage = 'Resolved', status = 'Resolved' WHERE id = 'r-1006'")
     pdb.commit()

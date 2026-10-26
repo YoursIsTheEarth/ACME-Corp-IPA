@@ -185,7 +185,10 @@ def _credit_confirmed(run_id: str, decided_by: str | None) -> None:
 
 
 def disposition_node(state: WorkflowState) -> dict[str, Any]:
-    """The only exit: record the invoice, supersede an unpaid original, then queue / reject / hold."""
+    """The only exit: record the invoice, supersede an unpaid original, then queue / reject / hold.
+
+    With payment delay off, a queued row is then paid by an `immediate` batch before the run finishes.
+    """
     run_id, invoice = state.run_id, state.invoice
     decision = state.decision or _no_invoice_decision(state)
     result: dict[str, Any] = {"held": False}
@@ -204,6 +207,10 @@ def disposition_node(state: WorkflowState) -> dict[str, Any]:
         queued = payments.queue_payment(run_id, invoice, decision)
         result |= {"action": queued.action, "row_id": queued.row_id, "kind": queued.kind,
                    "amount_usd": queued.amount, "reason": queued.reason}
+        if queued.action == "queued":
+            paid = payments.pay_now_if_immediate()  # delay off: paid before the run is reported finished
+            if paid is not None:
+                result["batch_id"] = paid.batch_id
         if queued.action == "held":
             result |= {"held": True, "hold_kind": payments.review_hold(run_id).kind}
 

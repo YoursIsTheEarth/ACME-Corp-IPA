@@ -16,7 +16,6 @@ from api_helpers import INVOICES, open_client, pay, upload
 def _api_env(tmp_path, monkeypatch):
     monkeypatch.setenv("DB_PATH", str(tmp_path / "acme.db"))
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
-    monkeypatch.setenv("PAYMENT_AUTO_IDLE", "false")
     get_settings.cache_clear()
     mock_bank.reset()
     yield
@@ -58,7 +57,7 @@ def api_golden(tmp_path_factory):
     with pytest.MonkeyPatch.context() as mp:
         mp.chdir(workdir)
         for name, value in (("LLM_PROVIDER", "grok"), ("XAI_API_KEY", "test-key"), ("DB_PATH", str(workdir / "acme.db")),
-                            ("UPLOAD_DIR", str(workdir / "uploads")), ("PAYMENT_AUTO_IDLE", "false")):
+                            ("UPLOAD_DIR", str(workdir / "uploads"))):
             mp.setenv(name, value)
         get_settings.cache_clear()
         fake_llm.install(mp)

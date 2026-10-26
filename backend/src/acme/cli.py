@@ -5,6 +5,9 @@
     python main.py --explain <run_id>
     python main.py payments run [--released-by NAME] [--json]
     python main.py review [<run_id> --decision approve|reject --reviewer NAME --rationale TEXT] [--json]
+    python main.py admin show [--json]
+    python main.py admin set [--delay-payments on|off] [--pay-at-end-of-day on|off] [--end-of-day-time HH:MM]
+                             [--end-of-day-timezone IANA] [--pay-when-queue-empty on|off] --by NAME [--json]
 
 Results go to stdout (rich, or JSON lines with --json); JSON logs go to stderr (WARNING and up,
 everything with --verbose or --json).
@@ -67,6 +70,17 @@ def build_parser() -> argparse.ArgumentParser:
     review.add_argument("--reviewer", help="your name (1-50 characters)")
     review.add_argument("--rationale", help="why (at least 15 characters)")
     _common(review, suppress=True)
+
+    admin = commands.add_parser("admin", help="show or change payment timing (no LLM key needed)")
+    admin.add_argument("action", choices=["show", "set"])
+    admin.add_argument("--delay-payments", choices=["on", "off"], help="off: pay each invoice at approval")
+    admin.add_argument("--pay-at-end-of-day", choices=["on", "off"], help="daily batch at the end-of-day time")
+    admin.add_argument("--end-of-day-time", metavar="HH:MM", help="24-hour time of the end-of-day batch")
+    admin.add_argument("--end-of-day-timezone", metavar="IANA", help="timezone of that time, e.g. America/Chicago")
+    admin.add_argument("--pay-when-queue-empty", choices=["on", "off"],
+                       help="pay once the Invoice Queue has been empty for PAYMENT_IDLE_DELAY_S")
+    admin.add_argument("--by", help="your name (1-50 characters); required for set")
+    _common(admin, suppress=True)
     return parser
 
 
@@ -122,6 +136,26 @@ def _recover(out: Output, provider: str | None) -> None:
         _report(out, process_run(run_id, provider))
 
 
+def _quiet_payments(out: Output):
+    """mock_payment prints to stdout; keep stdout pure JSON in --json mode (approvals may pay at once)."""
+    return contextlib.redirect_stdout(sys.stderr) if out.json else contextlib.nullcontext()
+
+
+def _payment_id(run_id: str) -> str | None:
+    """The payment ID of the run's latest paid row, if it was paid (at approval, with delay off)."""
+    from acme.payments._store import row_key
+
+    conn = connect()
+    try:
+        keys = [row_key(r) for r in conn.execute(
+            "SELECT * FROM payment_queue WHERE run_id = ? AND status = 'paid' ORDER BY id DESC", (run_id,))]
+        row = conn.execute(f"SELECT payment_id FROM payments WHERE idempotency_key IN ({','.join('?' * len(keys))}) "
+                           "ORDER BY id DESC LIMIT 1", keys).fetchone() if keys else None
+    finally:
+        conn.close()
+    return row["payment_id"] if row else None
+
+
 def _stage_printer(out: Output) -> Callable[[str, dict], None] | None:
     if out.json:
         return None
@@ -133,8 +167,9 @@ def _stage_printer(out: Output) -> Callable[[str, dict], None] | None:
 
 
 def _report(out: Output, result) -> None:
+    payment_id = _payment_id(result.run_id)
     if out.json:
-        out.emit(result.to_json())
+        out.emit(result.to_json() | {"payment_id": payment_id})
         return
     console = out.console
     if result.findings:
@@ -156,6 +191,10 @@ def _report(out: Output, result) -> None:
     amount = f"${result.total_usd:,.2f}" if result.total_usd is not None else "-"
     out.text(f"Invoice: {result.invoice_number or '-'}  Vendor: {result.vendor or '-'}  Amount (USD): {amount}")
     out.text(f"Decided by: {result.decided_by or '-'}")
+    if payment_id:
+        out.text(f"Paid at approval: payment {payment_id}", "bold green")
+    elif result.status == "Queued for payment":
+        out.text("Queued for payment (paid by the next payment batch)")
     if result.rationale:
         out.text(f"Rationale: {result.rationale}")
     out.text(f"Run ID: {result.run_id}", "bold")
@@ -190,8 +229,7 @@ def _pay(out: Output, released_by: str) -> int:
         out.text("Nothing is queued for payment; no payments made.")
         return 0
     try:
-        # mock_payment prints to stdout; keep stdout pure JSON in --json mode.
-        with contextlib.redirect_stdout(sys.stderr) if out.json else contextlib.nullcontext():
+        with _quiet_payments(out):
             batch = run_batch("pay_all", released_by)
     except (BatchAlreadyRunning, InvalidBatchRequest) as exc:
         out.error(str(exc))
@@ -225,10 +263,14 @@ def _process(args, out: Output) -> int:
     results = []
     for i, path in enumerate(paths, 1):
         out.text(f"[{i}/{len(paths)}] {path.name}" if args.batch else f"Processing {path}", "bold")
-        result = run_invoice(path, args.provider, _stage_printer(out))
+        with _quiet_payments(out):
+            result = run_invoice(path, args.provider, _stage_printer(out))
         results.append(result)
         if args.batch and not out.json:
-            out.text(f"  -> {result.outcome} ({result.final_status or result.status})  run {result.run_id}")
+            payment_id = _payment_id(result.run_id)
+            status = result.final_status or result.status
+            out.text(f"  -> {result.outcome} ({status}{', payment ' + payment_id if payment_id else ''})  "
+                     f"run {result.run_id}")
         else:
             _report(out, result)
 
@@ -274,7 +316,8 @@ def _review(args, out: Output) -> int:
         out.error(f"deciding a run needs {', '.join('--' + m for m in missing)}")
         return 1
     try:
-        result = resume_review(args.run_id, args.decision, args.reviewer, args.rationale)
+        with _quiet_payments(out):
+            result = resume_review(args.run_id, args.decision, args.reviewer, args.rationale)
     except ReviewInputError as exc:
         out.error(f"{exc}; the run is still awaiting review")
         return 1
@@ -282,6 +325,86 @@ def _review(args, out: Output) -> int:
         out.error(str(exc))
         return 1
     _report(out, result)
+    return 0
+
+
+# --- Admin -----------------------------------------------------------------------------------
+
+def _on_off(value: bool) -> str:
+    return "on" if value else "off"
+
+
+def _mode(timing) -> str:
+    """One sentence on what the payment timing does."""
+    if not timing.delay_payments:
+        return "Approved invoices are paid as soon as they are approved."
+    ways = []
+    if timing.pay_at_end_of_day:
+        ways.append(f"at {timing.end_of_day_time} {timing.end_of_day_timezone}")
+    if timing.pay_when_queue_empty:
+        ways.append("when the Invoice Queue is empty")
+    if not ways:
+        return "Approved invoices wait in the Payment Queue until someone pays them (Pay all or payments run)."
+    return f"Approved invoices wait in the Payment Queue and are paid {' or '.join(ways)}."
+
+
+def _show_settings(out: Output, view: dict) -> None:
+    from acme.admin import PaymentTiming
+
+    if out.json:
+        out.emit(view)
+        return
+    timing = PaymentTiming(**{k: view[k] for k in PaymentTiming.model_fields})
+    out.text("Payment timing", "bold")
+    out.text(f"  Delay payments: {_on_off(timing.delay_payments)}")
+    out.text(f"  Pay at end of day: {_on_off(timing.pay_at_end_of_day)} "
+             f"({timing.end_of_day_time} {timing.end_of_day_timezone})")
+    out.text(f"  Pay when the Invoice Queue is empty: {_on_off(timing.pay_when_queue_empty)}")
+    out.text(f"  {_mode(timing)}")
+    if view["updated_by"]:
+        out.text(f"  Last saved by {view['updated_by']} at {view['updated_at']}")
+    else:
+        out.text("  Never saved: these are the defaults")
+
+
+def _admin(args, out: Output) -> int:
+    from pydantic import ValidationError
+
+    from acme.admin import admin_settings, load_payment_timing, save_payment_timing
+
+    if args.action == "show":
+        _show_settings(out, admin_settings())
+        return 0
+    if not args.by:
+        out.error("admin set needs --by NAME (1-50 characters)")
+        return 2
+    flags = {"delay_payments": args.delay_payments, "pay_at_end_of_day": args.pay_at_end_of_day,
+             "end_of_day_time": args.end_of_day_time, "end_of_day_timezone": args.end_of_day_timezone,
+             "pay_when_queue_empty": args.pay_when_queue_empty}
+    changes = {k: (v == "on" if k not in ("end_of_day_time", "end_of_day_timezone") else v)
+               for k, v in flags.items() if v is not None}
+    conn = connect()
+    try:
+        batches_before = conn.execute("SELECT COUNT(*) FROM payment_batches").fetchone()[0]
+        try:
+            with _quiet_payments(out):
+                view = save_payment_timing(load_payment_timing(conn).model_dump() | changes, args.by)
+        except ValidationError as exc:
+            out.error("; ".join(f"{e['loc'][0] if e['loc'] else 'settings'}: {e['msg'].removeprefix('Value error, ')}"
+                                for e in exc.errors()) + "; nothing was saved")
+            return 1
+        except ValueError as exc:
+            out.error(f"{exc}; nothing was saved")
+            return 1
+        paid = conn.execute("SELECT batch_id, count, total_usd FROM payment_batches ORDER BY batch_id "
+                            "LIMIT -1 OFFSET ?", (batches_before,)).fetchall()  # the batch a switch to off ran
+    finally:
+        conn.close()
+    out.text(f"Saved by {view['updated_by']}.", "bold")
+    for batch in paid:
+        out.text(f"Delay turned off: immediate batch {batch['batch_id']} paid {batch['count']} queued "
+                 f"payment(s), total ${Decimal(batch['total_usd']):,.2f}")
+    _show_settings(out, view)
     return 0
 
 
@@ -398,6 +521,8 @@ def main(argv: list[str] | None = None) -> int:
     _ensure_db(out)
     if args.explain:
         return _explain(args.explain, out)
+    if args.command == "admin":
+        return _admin(args, out)
     with use_provider(args.provider):
         _recover(out, args.provider)
     if args.command == "review":

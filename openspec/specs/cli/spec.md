@@ -31,11 +31,15 @@ Gives operators and reviewers a terminal entry point to process invoice files, d
 - **THEN** stdout parses as JSON with outcome REJECT and a finding with code `STOCK_EXCEEDED`
 
 ### Requirement: Payment batch commands
-`--pay` SHALL run one payment batch after processing finishes, and `python main.py payments run` SHALL run one batch on demand. Both SHALL print the batch ID, rows paid, total paid, and failures. CLI batches SHALL record `pay_all` as the trigger and `cli` as released_by unless `--released-by <name>` (1–50 characters) is given. `payments run` makes no LLM call and SHALL work without an LLM key.
+`--pay` SHALL run one payment batch after processing finishes, and `python main.py payments run` SHALL run one batch on demand. Both SHALL pay whatever is payable in either payment mode and SHALL print the batch ID, rows paid, total paid, and failures. CLI batches SHALL record `pay_all` as the trigger and `cli` as released_by unless `--released-by <name>` (1–50 characters) is given. `payments run` makes no LLM call and SHALL work without an LLM key.
 
 #### Scenario: Process and pay
-- **WHEN** a user with an LLM key configured runs `python main.py --batch data/invoices --pay`
+- **WHEN** payment delay is on and a user with an LLM key configured runs `python main.py --batch data/invoices --pay`
 - **THEN** after all 20 runs finish a single batch pays 7 rows, and the summary prints the total paid
+
+#### Scenario: Process and pay with delay off
+- **WHEN** payment delay is off and a user with an LLM key configured runs `python main.py --batch data/invoices --pay`
+- **THEN** each approved invoice is paid as its run finishes, and the `--pay` batch prints that nothing is queued
 
 #### Scenario: Nothing queued
 - **WHEN** `python main.py payments run` runs with an empty payment queue
@@ -79,8 +83,12 @@ Gives operators and reviewers a terminal entry point to process invoice files, d
 After a `--batch` run, the CLI SHALL print and write `reports/summary.md` with counts per outcome, dollars queued, dollars paid, dollars blocked (rejected or held), and duplicates caught (F31).
 
 #### Scenario: Summary after golden batch with pay
-- **WHEN** `python main.py --batch data/invoices --pay` finishes with an LLM key configured
+- **WHEN** payment delay is on and `python main.py --batch data/invoices --pay` finishes with an LLM key configured
 - **THEN** `reports/summary.md` shows 7 paid, 1 superseded, 1 held, 11 rejected, and 3 duplicates caught
+
+#### Scenario: Summary after golden batch with delay off
+- **WHEN** payment delay is off and `python main.py --batch data/invoices` finishes with an LLM key configured
+- **THEN** `reports/summary.md` shows 7 paid, 1 revised, 0 superseded, 1 held, 11 rejected, 3 duplicates caught, and $37,620.00 paid
 
 ### Requirement: Provider override without offline
 `--provider grok|claude` SHALL override the configured LLM provider for that command only. Any other value, including `offline`, SHALL be rejected before any run starts with a message naming `grok` and `claude` as the valid values.
@@ -111,3 +119,25 @@ After a `--batch` run, the CLI SHALL print and write `reports/summary.md` with c
 #### Scenario: Explain works without a key
 - **WHEN** no API key is set and a user runs `python main.py --explain <run_id>` for an existing run
 - **THEN** the run's audit trail is printed and the command exits 0
+
+### Requirement: Immediate payment during CLI processing
+CLI processing SHALL follow the stored payment timing. With delay off, each approved invoice SHALL be paid by an `immediate` batch before its result is printed, and the result SHALL show the payment ID. With delay on, approved invoices SHALL be printed as queued for payment.
+
+#### Scenario: Single invoice paid at approval
+- **WHEN** payment delay is off and a user runs `python main.py --invoice_path=data/invoices/invoice_1001.txt`
+- **THEN** the output shows outcome APPROVE, final status Paid, and a payment ID
+
+#### Scenario: Single invoice queued with delay on
+- **WHEN** payment delay is on and the same command runs
+- **THEN** the output shows the invoice queued for payment and no payment ID
+
+### Requirement: Show and change payment timing from the terminal
+`python main.py admin show` SHALL print the current payment timing and who last saved it. `python main.py admin set` SHALL accept `--delay-payments`, `--pay-at-end-of-day`, `--end-of-day-time HH:MM`, `--end-of-day-timezone <IANA>`, `--pay-when-queue-empty` (each with `on` or `off` where boolean) and a required `--by <name>` (1–50 characters). It SHALL validate like the API, save, audit the change, and exit non-zero with a message on invalid input. Neither command needs an LLM key.
+
+#### Scenario: Turn on immediate payments
+- **WHEN** a user runs `python main.py admin set --delay-payments off --by Dana`
+- **THEN** the settings are saved with delay off and the other values unchanged, and `admin show` prints delay off, last saved by Dana
+
+#### Scenario: Invalid timezone
+- **WHEN** a user runs `python main.py admin set --end-of-day-timezone Mars/Olympus --by Dana`
+- **THEN** the command exits non-zero naming the bad timezone and nothing is saved

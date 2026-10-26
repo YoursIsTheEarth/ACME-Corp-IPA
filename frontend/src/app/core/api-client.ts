@@ -3,6 +3,8 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import {
+  AdminSettings,
+  AdminSettingsRequest,
   AuditFilter,
   AuditRow,
   BatchRow,
@@ -101,5 +103,13 @@ export class ApiClient {
 
   stats(): Observable<Stats> {
     return this.http.get<Stats>(`${API}/stats`);
+  }
+
+  getAdminSettings(): Observable<AdminSettings> {
+    return this.http.get<AdminSettings>(`${API}/admin/settings`);
+  }
+
+  saveAdminSettings(body: AdminSettingsRequest): Observable<AdminSettings> {
+    return this.http.put<AdminSettings>(`${API}/admin/settings`, body);
   }
 }

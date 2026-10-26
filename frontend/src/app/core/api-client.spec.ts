@@ -72,6 +72,22 @@ describe('ApiClient', () => {
     expectCall('GET', '/api/stats');
   });
 
+  it('GETs and PUTs the admin settings', () => {
+    api.getAdminSettings().subscribe();
+    expectCall('GET', '/api/admin/settings');
+    const body = {
+      delay_payments: false,
+      pay_at_end_of_day: false,
+      end_of_day_time: '17:00',
+      end_of_day_timezone: 'America/Chicago',
+      pay_when_queue_empty: true,
+      updated_by: 'Dana',
+    };
+    api.saveAdminSettings(body).subscribe();
+    const req = expectCall('PUT', '/api/admin/settings');
+    expect(req.request.body).toEqual(body);
+  });
+
   it('builds CSV export links with the current filter', () => {
     expect(csvUrl('invoices.csv', { status: 'Rejected', search: '' })).toBe('/api/invoices.csv?status=Rejected');
     expect(csvUrl('payments.csv')).toBe('/api/payments.csv');

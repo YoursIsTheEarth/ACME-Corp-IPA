@@ -4,8 +4,9 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatDialog } from '@angular/material/dialog';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
+import { RouterLink } from '@angular/router';
 
-import { PaymentKind, PaymentQueueRow } from '../core/api.models';
+import { PaymentKind, PaymentQueueResponse, PaymentQueueRow } from '../core/api.models';
 import { DetailDrawer } from '../core/drawer';
 import { Stores } from '../core/live-store';
 import { PayConfirmDialog, PayDialogData, PayScope } from '../dialogs/pay-confirm.dialog';
@@ -19,6 +20,16 @@ export const KIND_LABELS: Record<PaymentKind, string> = {
   delta: 'Revision delta',
 };
 
+/** The header's payment mode: paid at approval (delay off), or how queued invoices get paid (delay on). */
+export function paymentMode(d: PaymentQueueResponse): string {
+  if (!d.delay_payments) return 'Payments are made at approval.';
+  const ways = [
+    ...(d.next_batch_label ? [`at end of day (next: ${d.next_batch_label})`] : []),
+    ...(d.pay_when_queue_empty ? ['when the Invoice Queue is empty'] : []),
+  ];
+  return ways.length ? `Queued invoices are paid ${ways.join(' or ')}.` : 'Queued invoices are paid only when someone clicks Pay.';
+}
+
 /** F40: approved invoices waiting to be paid, and the controls that release them. */
 @Component({
   selector: 'app-payment-queue-page',
@@ -27,6 +38,7 @@ export const KIND_LABELS: Record<PaymentKind, string> = {
     MatButtonModule,
     MatIconModule,
     MatProgressBarModule,
+    RouterLink,
     InvoiceTableComponent,
     CellDefDirective,
     StatusChipComponent,
@@ -39,21 +51,39 @@ export const KIND_LABELS: Record<PaymentKind, string> = {
         <div>
           <h1>Payment Queue</h1>
           <p>Approved invoices wait here until a batch pays them. Every release records who clicked Pay.</p>
+          @if (data(); as d) {
+            <p class="muted" data-testid="pq-mode-sentence">{{ modeText(d) }}</p>
+          }
         </div>
       </header>
 
       <section class="cards" data-testid="pq-header">
         <div class="card"><span class="l">Queued</span><span class="n" data-testid="pq-count">{{ data()?.count ?? '—' }}</span></div>
         <div class="card"><span class="l">Total</span><span class="n" data-testid="pq-total">{{ data()?.total_usd | usd }}</span></div>
-        <div class="card"><span class="l">Next scheduled batch</span><span class="n sm" data-testid="pq-next">{{ data()?.next_batch_label ?? '—' }}</span></div>
+        @if (data(); as d) {
+          @if (d.delay_payments) {
+            <div class="card">
+              <span class="l">Next scheduled batch</span>
+              <span class="n sm" data-testid="pq-next">{{ d.next_batch_label ?? 'No end-of-day batch' }}</span>
+            </div>
+            <div class="card">
+              <span class="l">Pay when the Invoice Queue is empty</span>
+              <span class="n sm" data-testid="pq-idle">
+                {{ d.pay_when_queue_empty ? 'On' : 'Off' }}
+                @if (d.pay_when_queue_empty) { <span class="muted small">after {{ d.idle_delay_s }}s idle</span> }
+              </span>
+            </div>
+          } @else {
+            <div class="card">
+              <span class="l">Payment mode</span>
+              <span class="n sm" data-testid="pq-mode">Paid at approval</span>
+              <span class="muted small">Approved invoices are paid as soon as they are approved; only failed payments wait here.</span>
+            </div>
+          }
+        }
         <div class="card">
-          <span class="l">Auto-pay on idle</span>
-          <span class="n sm" data-testid="pq-idle">
-            @if (data(); as d) {
-              {{ d.auto_idle ? 'On' : 'Off' }}
-              @if (d.auto_idle) { <span class="muted small">after {{ d.idle_delay_s }}s idle</span> }
-            } @else { — }
-          </span>
+          <span class="l">Payment timing</span>
+          <a class="admin-link" routerLink="/admin" data-testid="pq-admin-link">Change on the Admin page</a>
         </div>
       </section>
 
@@ -115,6 +145,7 @@ export const KIND_LABELS: Record<PaymentKind, string> = {
     .running { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; padding: 10px 14px; border-radius: 8px; background: #e0f7fa; }
     .fail { color: #b71c1c; }
     .link { cursor: pointer; font-weight: 600; }
+    .admin-link { font-weight: 600; }
   `,
 })
 export class PaymentQueuePage {
@@ -127,6 +158,7 @@ export class PaymentQueuePage {
   @ViewChild('table') table?: InvoiceTableComponent<PaymentQueueRow>;
 
   readonly canPay = (row: PaymentQueueRow) => row.status !== 'paying';
+  readonly modeText = paymentMode;
   readonly kindLabel = (kind: PaymentKind) => KIND_LABELS[kind] ?? kind;
 
   readonly columns: TableColumn<PaymentQueueRow>[] = [

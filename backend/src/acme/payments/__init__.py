@@ -15,17 +15,20 @@ Disposition tools (called by the workflow's Disposition node, in this order):
 Executor:
     run_batch(trigger, released_by, ids=None)        -> BatchResult; raises BatchAlreadyRunning (409 / skip
                                                      tick) or InvalidBatchRequest (422)
+    pay_now_if_immediate()                           delay off: an `immediate` batch of what is payable now
+                                                     (after a disposition queues, after every batch, on save)
     is_batch_running()
+    immediate_scope(conn, max_attempts)              row ids an `immediate` batch would take now
     recover_interrupted_batch()                      at CLI and API startup, before any batch
     resume_payment_failure(run_id, approve, reviewer, rationale)
 
-Trigger decisions (pure; the caller passes `now` and the settings):
-    next_batch_time(now, settings), end_of_day_due(now, last_eod_run, settings),
-    idle_batch_due(now, runs_snapshot, queue_count, batch_running, settings)
+Trigger decisions (pure; the caller passes `now`, the settings, and the admin `PaymentTiming`):
+    next_batch_time(now, timing), end_of_day_due(now, last_eod_run, timing),
+    idle_batch_due(now, runs_snapshot, queue_count, batch_running, settings, timing)
     load_runs_snapshot(conn), payable_count(conn, max_attempts)   inputs for idle_batch_due
 
 Events: `events.subscribe(listener)` receives payment.queued, payment.cancelled, batch.started,
-payment.created, batch.finished.
+payment.created, batch.finished, and settings.updated (from `acme.admin`).
 
 Single-process assumption: one batch at a time is enforced by an in-process `threading.Lock`.
 Across processes (CLI and API at once) the `queued -> paying` claim under `BEGIN IMMEDIATE` and the
@@ -38,7 +41,9 @@ from acme.payments.executor import (
     BatchResult,
     InvalidBatchRequest,
     RowResult,
+    immediate_scope,
     is_batch_running,
+    pay_now_if_immediate,
     recover_interrupted_batch,
     resume_payment_failure,
     run_batch,
@@ -77,9 +82,11 @@ __all__ = [
     "end_of_day_due",
     "enqueue_review",
     "idle_batch_due",
+    "immediate_scope",
     "is_batch_running",
     "load_runs_snapshot",
     "next_batch_time",
+    "pay_now_if_immediate",
     "payable_count",
     "queue_payment",
     "record_processed",

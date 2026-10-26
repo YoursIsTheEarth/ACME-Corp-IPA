@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from acme import workflow
+from acme.admin import PaymentTiming, save_payment_timing
 from acme.payments import mock_bank
 from acme.payments._store import BATCH_LOCK
 from acme.settings import get_settings
@@ -112,12 +113,13 @@ def last_activity(conn) -> datetime:
 
 
 @pytest.fixture
-def idle_on(monkeypatch):
-    monkeypatch.setenv("PAYMENT_AUTO_IDLE", "true")
-    get_settings.cache_clear()
+def end_of_day_on(db):
+    save_payment_timing(PaymentTiming(pay_at_end_of_day=True), "Dana")  # delay on, 17:00 America/Chicago
 
 
-def test_idle_waits_for_whole_upload(idle_on, client, conn, monkeypatch):
+# Idle tests run with the default timing: delay on, pay when the Invoice Queue is empty on.
+
+def test_idle_waits_for_whole_upload(client, conn, monkeypatch):
     gate, real = threading.Event(), workflow.process_run
 
     def gated(*args, **kwargs):
@@ -139,7 +141,7 @@ def test_idle_waits_for_whole_upload(idle_on, client, conn, monkeypatch):
     assert tick(client, last + timedelta(hours=1)) is None  # nothing left to pay
 
 
-def test_idle_blocked_while_processing(idle_on, client, conn):
+def test_idle_blocked_while_processing(client, conn):
     upload(client, "invoice_1001.txt")
     conn.execute("INSERT INTO invoice_runs (id, file_name, uploaded_at, status, stage) "
                  "VALUES ('run-busy', 'x.txt', ?, 'Processing', 'Validating')", (datetime.now(timezone.utc).isoformat(),))
@@ -150,7 +152,7 @@ def test_idle_blocked_while_processing(idle_on, client, conn):
     assert tick(client, datetime.now(timezone.utc) + timedelta(hours=1)) is not None
 
 
-def test_held_invoice_does_not_block_idle(idle_on, client, conn):
+def test_held_invoice_does_not_block_idle(client, conn):
     upload(client, "invoice_1001.txt", "invoice_1010.txt")
     assert client.get("/api/stats").json()["awaiting_review"] == 1
     batch_id = tick(client, last_activity(conn) + timedelta(seconds=61))
@@ -158,13 +160,14 @@ def test_held_invoice_does_not_block_idle(idle_on, client, conn):
 
 
 def test_idle_disabled(client, conn):
+    save_payment_timing(PaymentTiming(pay_when_queue_empty=False), "Dana")
     upload(client, "invoice_1001.txt")
     assert tick(client, datetime.now(timezone.utc) + timedelta(days=1)) is None
-    assert client.get("/api/payment-queue").json()["auto_idle"] is False
+    assert client.get("/api/payment-queue").json()["pay_when_queue_empty"] is False
     assert conn.execute("SELECT COUNT(*) FROM payment_batches").fetchone()[0] == 0
 
 
-def test_scheduled_ticks_skip_while_a_batch_runs(idle_on, client, conn):
+def test_scheduled_ticks_skip_while_a_batch_runs(end_of_day_on, client, conn):
     upload(client, "invoice_1001.txt")
     svc = client.app.state.services
     with BATCH_LOCK:
@@ -177,10 +180,60 @@ def test_scheduled_ticks_skip_while_a_batch_runs(idle_on, client, conn):
     assert (record["trigger"], record["released_by"], record["count"]) == ("end_of_day", "System", 1)
 
 
-def test_scheduler_jobs(idle_on):
+def test_end_of_day_job_does_nothing_when_turned_off(client, conn):
+    upload(client, "invoice_1001.txt")
+    assert client.portal.call(client.app.state.services.scheduler.end_of_day) is None  # defaults: end of day off
+    assert conn.execute("SELECT COUNT(*) FROM payment_batches").fetchone()[0] == 0
+
+
+def eod_local(scheduler):
+    job = scheduler.get_job("end_of_day")
+    return None if job is None else job.next_run_time.astimezone(ZoneInfo("America/Chicago"))
+
+
+def test_scheduler_jobs(end_of_day_on):
     with open_client(enable_scheduler=True) as client:
         scheduler = client.app.state.services.scheduler.scheduler
-        eod = scheduler.get_job("end_of_day")
-        local = eod.next_run_time.astimezone(ZoneInfo("America/Chicago"))
+        local = eod_local(scheduler)
         assert (local.hour, local.minute) == (17, 0)
         assert scheduler.get_job("idle_check").trigger.interval == timedelta(seconds=5)
+
+
+def test_defaults_schedule_no_end_of_day_job():
+    with open_client(enable_scheduler=True) as client:
+        scheduler = client.app.state.services.scheduler.scheduler
+        assert scheduler.get_job("end_of_day") is None and scheduler.get_job("idle_check") is not None
+
+
+def test_saving_settings_reschedules_without_restart(end_of_day_on):
+    body = {"delay_payments": True, "pay_at_end_of_day": True, "end_of_day_time": "15:00",
+            "end_of_day_timezone": "America/Chicago", "pay_when_queue_empty": True, "updated_by": "Dana"}
+    with open_client(enable_scheduler=True) as client:
+        scheduler = client.app.state.services.scheduler.scheduler
+        assert (eod_local(scheduler).hour, eod_local(scheduler).minute) == (17, 0)
+        assert client.put("/api/admin/settings", json=body).status_code == 200
+        assert (eod_local(scheduler).hour, eod_local(scheduler).minute) == (15, 0)  # moved, not added
+        assert [j.id for j in scheduler.get_jobs()].count("end_of_day") == 1
+        assert client.put("/api/admin/settings", json=body | {"pay_at_end_of_day": False}).status_code == 200
+        assert scheduler.get_job("end_of_day") is None
+
+
+def test_tick_picks_up_settings_saved_elsewhere():
+    with open_client(enable_scheduler=True) as client:
+        svc = client.app.state.services
+        assert svc.scheduler.scheduler.get_job("end_of_day") is None
+        save_payment_timing(PaymentTiming(pay_at_end_of_day=True, end_of_day_time="08:30"), "cli")  # like `admin set`
+        client.portal.call(svc.scheduler.idle_tick)
+        assert (eod_local(svc.scheduler.scheduler).hour, eod_local(svc.scheduler.scheduler).minute) == (8, 30)
+
+
+def test_delay_off_pays_a_stranded_row_within_one_tick(client, conn):
+    upload(client, "invoice_1001.txt")
+    # Delay turned off elsewhere without paying (e.g. the process died before its immediate batch ran).
+    save_payment_timing(PaymentTiming(delay_payments=False), "Dana", pay_queued=False)
+    assert len(queue_rows(client)) == 1
+    batch_id = tick(client, datetime.now(timezone.utc))
+    record = batch_record(conn, batch_id)
+    assert (record["trigger"], record["released_by"], record["count"]) == ("immediate", "System", 1)
+    assert queue_rows(client) == []
+    assert tick(client, datetime.now(timezone.utc)) is None  # nothing payable: no empty batch

@@ -69,15 +69,19 @@ The system SHALL model `InvoiceState` with `run_id`, `file_path`, `raw_text`, `e
 - **THEN** the loaded state equals the original
 
 ### Requirement: Database schema
-The system SHALL keep all persistent state in one SQLite file, `acme.db`, with tables `inventory` (`item` PK, `stock`, `unit_price`, `category`), `item_aliases`, `vendors`, `processed_invoices`, `payments` (unique `idempotency_key`), `audit_log`, `llm_calls`, `invoice_runs`, `review_decisions`, `payment_queue`, and `payment_batches`, with the columns listed in the design spec. Creating the schema SHALL be idempotent.
+The system SHALL keep all persistent state in one SQLite file, `acme.db`, with tables `inventory` (`item` PK, `stock`, `unit_price`, `category`), `item_aliases`, `vendors`, `processed_invoices`, `payments` (unique `idempotency_key`), `audit_log`, `llm_calls`, `invoice_runs`, `review_decisions`, `payment_queue`, `payment_batches`, and `admin_settings`, with the columns listed in the design spec. `payment_batches.trigger` SHALL also accept `immediate`. Creating the schema SHALL be idempotent.
 
 #### Scenario: Schema created on empty file
 - **WHEN** schema creation runs against a missing `acme.db`
-- **THEN** the file is created and contains all eleven tables
+- **THEN** the file is created and contains all twelve tables
 
 #### Scenario: Schema creation is repeatable
 - **WHEN** schema creation runs a second time against an existing `acme.db`
 - **THEN** no error occurs and existing rows are preserved
+
+#### Scenario: Existing database gains the settings table
+- **WHEN** schema creation runs against an `acme.db` created before `admin_settings` existed
+- **THEN** the `admin_settings` table (`key` PK, `value`, `updated_by`, `updated_at`) is added, it is empty, and existing rows in every other table are preserved
 
 #### Scenario: Payment idempotency enforced by the database
 - **WHEN** two rows with the same `idempotency_key` are inserted into `payments`

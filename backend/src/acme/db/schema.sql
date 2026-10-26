@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS review_decisions (
 CREATE TABLE IF NOT EXISTS payment_batches (
     batch_id      TEXT PRIMARY KEY,
     trigger       TEXT NOT NULL
-        CHECK (trigger IN ('end_of_day', 'idle', 'pay_all', 'pay_selected', 'pay_now')),
+        CHECK (trigger IN ('end_of_day', 'idle', 'immediate', 'pay_all', 'pay_selected', 'pay_now')),
     released_by   TEXT NOT NULL,
     started_at    TEXT NOT NULL,
     finished_at   TEXT,
@@ -120,3 +120,11 @@ CREATE TABLE IF NOT EXISTS payment_queue (
     batch_id        TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_payment_queue_status ON payment_queue (status);
+
+-- Operator settings edited at runtime (Admin page, `admin set`); `value` is JSON. Defaults live in code.
+CREATE TABLE IF NOT EXISTS admin_settings (
+    key         TEXT PRIMARY KEY,
+    value       TEXT NOT NULL,
+    updated_by  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);

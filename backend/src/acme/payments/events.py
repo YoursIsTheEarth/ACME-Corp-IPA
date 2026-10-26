@@ -2,7 +2,8 @@
 
     unsubscribe = subscribe(lambda name, data: ...)
 
-Events: `payment.queued`, `payment.cancelled`, `batch.started`, `payment.created`, `batch.finished`.
+Events: `payment.queued`, `payment.cancelled`, `batch.started`, `payment.created`, `batch.finished`, and
+`settings.updated` (emitted by `acme.admin` when payment timing is saved).
 A failing listener is logged and never breaks a payment path.
 """
 

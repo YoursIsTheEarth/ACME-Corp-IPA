@@ -1,5 +1,8 @@
 """Golden suite (F20): all 20 provided files in sorted filename order, with the test-only fake model, then one payment batch.
 
+It runs with the default payment timing (delay on, end of day off, pay when queue empty on; no scheduler, so
+the explicit batch pays), and again with delay explicitly off (immediate payments, see the end of the file).
+
 Rows that needed a P1 feature were staged as strict expected failures (`NEEDS_FEATURE`); F7, F11,
 and F12 have landed, so no row is tagged and the outcome-count assert runs.
 """
@@ -8,13 +11,11 @@ from decimal import Decimal
 
 import pytest
 
-from acme.db import connect
-from acme.db.seed import seed
+from acme.admin import PaymentTiming
 from acme.logging import read_trace
-from acme.payments import mock_bank, run_batch
+from acme.payments import run_batch
 from acme.settings import get_settings
 from acme.workflow import run_folder, run_state
-import fake_llm
 from workflow_helpers import INVOICES
 
 D = Decimal
@@ -47,7 +48,8 @@ GOLDEN_TABLE = {
 # Rows staged until a P1 feature lands, e.g. {"invoice_1014.xml": "F7"}. Empty: F7, F11, F12 have landed.
 NEEDS_FEATURE: dict[str, str] = {}
 
-OUTCOME_OF_STATUS = {"Paid": "PAID", "Superseded": "SUPERSEDED", "Rejected": "REJECT", "Duplicate": "REJECT"}
+OUTCOME_OF_STATUS = {"Paid": "PAID", "Superseded": "SUPERSEDED", "Rejected": "REJECT", "Duplicate": "REJECT",
+                     "Revised": "REVISED"}
 
 
 def _snapshot(conn) -> dict:
@@ -58,39 +60,25 @@ def _snapshot(conn) -> dict:
     return {"runs": runs, "paid": paid, "payments": conn.execute("SELECT COUNT(*) FROM payments").fetchone()[0]}
 
 
+DEFAULT_TIMING = PaymentTiming(delay_payments=True, pay_at_end_of_day=False, pay_when_queue_empty=True)
+IMMEDIATE_TIMING = PaymentTiming(delay_payments=False)
+
+
 @pytest.fixture(scope="module")
-def golden_run(tmp_path_factory):
-    """Process the folder, pay once, then pay again and reprocess (idempotency). Returns plain data."""
-    workdir = tmp_path_factory.mktemp("golden")
-    with pytest.MonkeyPatch.context() as mp:
-        mp.chdir(workdir)
-        mp.setenv("LLM_PROVIDER", "grok")
-        mp.setenv("XAI_API_KEY", "test-key")
-        mp.setenv("DB_PATH", str(workdir / "acme.db"))
-        calls = []
-        real_payment = mock_bank.mock_payment
-        mp.setattr(mock_bank, "mock_payment", lambda vendor, amount: calls.append((vendor, amount))
-                   or real_payment(vendor, amount))
-        mock_bank.reset()
-        get_settings.cache_clear()
-        fake_llm.install(mp)
-        conn = connect()
-        try:
-            seed(conn)
-            results = run_folder(INVOICES)
-            before_batch = _snapshot(conn)
-            states = {r.file: run_state(r.run_id) for r in results}
-            traces = {r.file: read_trace(r.run_id) for r in results}
-            batch = run_batch("pay_all", "test")
-            after_batch = _snapshot(conn)
-            second = run_batch("pay_all", "test")
-            rerun = run_folder(INVOICES)
-            third = run_batch("pay_all", "test")
-            final = _snapshot(conn)
-            fx_eur = get_settings().fx_rates["EUR"]
-        finally:
-            conn.close()
-            get_settings.cache_clear()
+def golden_run(run_golden):
+    """Default timing: process the folder, pay once, then pay again and reprocess (idempotency). Plain data."""
+    with run_golden(DEFAULT_TIMING) as (conn, calls):
+        results = run_folder(INVOICES)
+        before_batch = _snapshot(conn)
+        states = {r.file: run_state(r.run_id) for r in results}
+        traces = {r.file: read_trace(r.run_id) for r in results}
+        batch = run_batch("pay_all", "test")
+        after_batch = _snapshot(conn)
+        second = run_batch("pay_all", "test")
+        rerun = run_folder(INVOICES)
+        third = run_batch("pay_all", "test")
+        final = _snapshot(conn)
+        fx_eur = get_settings().fx_rates["EUR"]
     return {"results": results, "before": before_batch, "after": after_batch, "states": states, "traces": traces,
             "batch": batch, "second": second, "rerun": rerun, "third": third, "final": final, "calls": calls,
             "fx_eur": fx_eur}
@@ -194,3 +182,73 @@ def test_reprocessing_folder_pays_nothing(golden_run):
             assert "DUPLICATE" in {f.code.value for f in rerun[name].findings}
     assert golden_run["third"].count == 0
     assert golden_run["final"]["payments"] == 7 and len(golden_run["calls"]) == 7
+
+
+# --- immediate payments (delay off, set explicitly) ------------------------------------------
+
+IMMEDIATE_CHANGES = {
+    "invoice_1004.json": ("PAID", D("1890.00"), set()),
+    "invoice_1004_revised.json": ("REVISED", D("4050.00"), {"REVISION"}),
+}
+
+
+@pytest.fixture(scope="module")
+def golden_immediate(run_golden):
+    """Delay off: every approval is paid by its own `immediate` batch; no manual batch runs before `after`."""
+    with run_golden(IMMEDIATE_TIMING) as (conn, calls):
+        results = run_folder(INVOICES)
+        after = _snapshot(conn)
+        states = {r.file: run_state(r.run_id) for r in results}
+        traces = {r.file: read_trace(r.run_id) for r in results}
+        batches = [dict(b) for b in conn.execute("SELECT * FROM payment_batches ORDER BY batch_id")]
+        kinds = {r["run_id"]: r["kind"] for r in conn.execute("SELECT run_id, kind FROM payment_queue")}
+        following = run_batch("pay_all", "test")
+        fx_eur = get_settings().fx_rates["EUR"]
+    return {"results": results, "after": after, "states": states, "traces": traces, "batches": batches,
+            "kinds": kinds, "following": following, "calls": calls, "fx_eur": fx_eur}
+
+
+@pytest.mark.parametrize("name", list(GOLDEN_TABLE))
+def test_immediate_golden_row(golden_immediate, name):
+    expected_outcome, expected_paid, expected_codes = IMMEDIATE_CHANGES.get(name, GOLDEN_TABLE[name])
+    run = golden_immediate["after"]["runs"][name]
+    assert _outcome(run) == expected_outcome
+    assert expected_codes <= _codes(golden_immediate, name)
+    if expected_paid == EUR_4125:
+        expected_paid = (D("4125.00") * golden_immediate["fx_eur"]).quantize(D("0.01"))
+    assert golden_immediate["after"]["paid"].get(run["id"]) == expected_paid
+
+
+def test_immediate_1004_paid_and_revision_pays_the_delta(golden_immediate):
+    original = golden_immediate["after"]["runs"]["invoice_1004.json"]
+    revision = golden_immediate["after"]["runs"]["invoice_1004_revised.json"]
+    assert original["final_status"] == "Paid"
+    assert "SUPERSEDED_BY_REVISION" not in _codes(golden_immediate, "invoice_1004.json")
+    assert revision["final_status"] == "Revised"
+    assert golden_immediate["kinds"][revision["id"]] == "delta"
+    assert golden_immediate["after"]["paid"][revision["id"]] == D("4050.00")  # $5,940.00 - $1,890.00
+
+
+def test_immediate_outcome_counts(golden_immediate):
+    runs = golden_immediate["after"]["runs"].values()
+    finals = [r["final_status"] for r in runs]
+    counts = {
+        "paid": finals.count("Paid"), "revised": finals.count("Revised"), "superseded": finals.count("Superseded"),
+        "held": sum(r["status"] == "Awaiting review" for r in runs),
+        "rejected": finals.count("Rejected") + finals.count("Duplicate"), "duplicates": finals.count("Duplicate"),
+    }
+    assert counts == {"paid": 7, "revised": 1, "superseded": 0, "held": 1, "rejected": 11, "duplicates": 3}
+
+
+def test_immediate_batches(golden_immediate):
+    batches = golden_immediate["batches"]
+    assert len(batches) == 8 and len(golden_immediate["calls"]) == 8
+    assert {(b["trigger"], b["released_by"], b["count"], b["failed_count"]) for b in batches} == {
+        ("immediate", "System", 1, 0)}
+    assert sum(D(b["total_usd"]) for b in batches) == D("37620.00")
+    assert golden_immediate["after"]["payments"] == 8
+
+
+def test_immediate_following_batch_pays_nothing(golden_immediate):
+    following = golden_immediate["following"]
+    assert (following.count, following.total_usd, following.results) == (0, D("0.00"), [])

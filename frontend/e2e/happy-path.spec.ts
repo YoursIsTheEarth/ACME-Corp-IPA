@@ -52,3 +52,43 @@ test('upload 3, approve INV-1010, pay all, see them in Payments', async ({ page 
   }
   await expect(page.getByTestId('payments-total')).toContainText('3 payments');
 });
+
+// Runs after the happy path (same backend): invoice_1006.csv was already paid there, so this step
+// uploads invoice_1015.csv, another clean invoice, to show payment at approval.
+test('turn delay off on Admin, then an approved invoice is paid without clicking Pay', async ({ page }) => {
+  // Admin: the defaults keep approved invoices in the Payment Queue; turn delay off and save as Dana Reyes.
+  await page.goto('/');
+  await page.getByTestId('nav-/admin').first().click();
+  await expect(page).toHaveURL(/\/admin$/);
+  await expect(page.getByTestId('mode')).toContainText('Approved invoices wait in the Payment Queue');
+  await page.getByTestId('delay-toggle').getByRole('switch').click();
+  await expect(page.getByTestId('batch-options')).toHaveCount(0);
+  await expect(page.getByTestId('pays-queue-warning')).toBeVisible();
+  await page.getByTestId('save').click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByTestId('change-summary')).toContainText('Delay payments: On → Off');
+  await dialog.getByTestId('name-input').fill('Dana Reyes');
+  await dialog.getByTestId('confirm').click();
+  await expect(page.getByText('Payment settings saved by Dana Reyes.')).toBeVisible();
+  await expect(page.getByTestId('last-saved')).toContainText('Last saved by Dana Reyes');
+  await expect(page.getByTestId('mode')).toContainText('paid as soon as they are approved');
+
+  // Payment Queue: the header says payments are made at approval and links to Admin.
+  await page.getByTestId('nav-/payment-queue').first().click();
+  await expect(page.getByTestId('pq-mode')).toHaveText('Paid at approval');
+  await expect(page.getByTestId('pq-admin-link')).toHaveAttribute('href', '/admin');
+
+  // Home: upload one clean invoice; it is paid as soon as it is approved.
+  await page.getByTestId('nav-/').first().click();
+  await page.getByTestId('file-input').setInputFiles(path.join(invoices, 'invoice_1015.csv'));
+  await expect(page.getByText('1 file was accepted')).toBeVisible();
+
+  // Payments: paid by an immediate batch released by System; nobody clicked Pay.
+  await page.getByTestId('nav-/payments').first().click();
+  const row = page.locator('tr.data-row', { hasText: 'INV-1015' });
+  await expect(row).toBeVisible();
+  await expect(row).toContainText('Immediate (at approval)');
+  await expect(row).toContainText('System');
+  await page.getByTestId('nav-/payment-queue').first().click();
+  await expect(page.getByText('Nothing is waiting to be paid.')).toBeVisible();
+});

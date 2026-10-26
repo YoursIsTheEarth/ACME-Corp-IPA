@@ -1,8 +1,10 @@
 """Read views: invoice lists, detail and file, payments, payment queue, stats (tasks 3.1-3.4)."""
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
+from acme.admin import PaymentTiming, save_payment_timing
 from acme.workflow import create_run
 from api_helpers import INVOICES, pay, upload
 
@@ -164,14 +166,52 @@ def test_delta_payment_label(client):
 # --- 3.4 ---------------------------------------------------------------------------------------
 
 def test_payment_queue_two_full_rows(client):
+    save_payment_timing(PaymentTiming(pay_at_end_of_day=True), "Dana")  # delay on, end of day at the defaults
     upload(client, "invoice_1001.txt", "invoice_1006.csv")
     queue = client.get("/api/payment-queue").json()
     assert queue["count"] == 2 and queue["total_usd"] == "7750.00"
     assert [r["kind"] for r in queue["rows"]] == ["full", "full"]
     assert all(r["status"] == "queued" and r["attempts"] == 0 and r["approved_by"] for r in queue["rows"])
+    assert (queue["delay_payments"], queue["pay_at_end_of_day"], queue["pay_when_queue_empty"]) == (True, True, True)
     assert queue["next_batch_label"].endswith("5:00 PM CT") and queue["timezone"] == "America/Chicago"
     assert queue["next_batch_at"].endswith(("-05:00", "-06:00")) and "T17:00:00" in queue["next_batch_at"]
-    assert queue["auto_idle"] is False and queue["batch_running"] is False
+    assert queue["batch_running"] is False and "auto_idle" not in queue
+
+
+def test_payment_queue_mode_with_the_defaults(client):
+    upload(client, "invoice_1001.txt")
+    queue = client.get("/api/payment-queue").json()
+    assert queue["count"] == 1
+    assert (queue["delay_payments"], queue["pay_at_end_of_day"], queue["pay_when_queue_empty"]) == (True, False, True)
+    assert (queue["next_batch_at"], queue["next_batch_label"], queue["timezone"]) == (None, None, "America/Chicago")
+
+
+def test_payment_queue_mode_with_delay_off(client):
+    save_payment_timing(PaymentTiming(delay_payments=False, pay_at_end_of_day=True), "Dana")
+    upload(client, "invoice_1001.txt")
+    queue = client.get("/api/payment-queue").json()
+    assert (queue["delay_payments"], queue["next_batch_at"], queue["next_batch_label"]) == (False, None, None)
+    assert queue["rows"] == [] and queue["count"] == 0  # paid at approval
+
+
+def test_dates_use_the_admin_timezone(client):
+    """Audit date filters (and stats' "today") use the admin end-of-day timezone, not UTC."""
+    [rejected] = upload(client, "invoice_1002.txt")
+    east = datetime.now(timezone.utc).astimezone(ZoneInfo("Etc/GMT-14")).date()  # UTC+14: 26 h ahead of UTC-12
+    params = {"view": "audit", "date_from": str(east), "date_to": str(east)}
+    for tz, expected in (("Etc/GMT-14", [rejected]), ("Etc/GMT+12", [])):
+        save_payment_timing(PaymentTiming(end_of_day_timezone=tz), "Dana")
+        assert [r["id"] for r in client.get("/api/invoices", params=params).json()["rows"]] == expected, tz
+        assert client.get("/api/stats").json()["rejected_today"] == 1
+
+
+def test_audit_status_filter_revised(client):
+    save_payment_timing(PaymentTiming(delay_payments=False), "Dana")
+    original, revision = upload(client, "invoice_1004.json", "invoice_1004_revised.json")
+    rows = client.get("/api/invoices", params={"view": "audit", "status": "Revised"}).json()["rows"]
+    assert [(r["id"], r["final_status"]) for r in rows] == [(revision, "Revised")]
+    paid = client.get("/api/invoices", params={"view": "audit", "status": "Paid"}).json()["rows"]
+    assert [r["id"] for r in paid] == [original]
 
 
 def test_revision_replaces_queued_row(client):

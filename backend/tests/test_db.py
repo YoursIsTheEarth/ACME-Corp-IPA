@@ -3,6 +3,7 @@ import sqlite3
 import subprocess
 import sys
 from decimal import Decimal
+from importlib.resources import files
 from pathlib import Path
 
 import pytest
@@ -24,7 +25,7 @@ def test_schema_created_on_missing_file(tmp_path):
     init_schema(conn)
     assert path.exists()
     assert set(TABLES) <= _tables(conn)
-    assert len(TABLES) == 11
+    assert len(TABLES) == 12
     columns = {r["name"] for r in conn.execute("PRAGMA table_info(payment_queue)")}
     assert columns >= {"id", "run_id", "invoice_number", "revision", "vendor", "amount_usd", "kind",
                        "status", "attempts", "last_error", "queued_at", "batch_id"}
@@ -42,6 +43,47 @@ def test_init_schema_twice_keeps_rows(db):
     db.commit()
     init_schema(db)
     assert db.execute("SELECT count(*) FROM audit_log").fetchone()[0] == 1
+
+
+def _old_schema() -> str:
+    """The schema as it was before `admin_settings` and the `immediate` trigger."""
+    schema = files("acme.db").joinpath("schema.sql").read_text(encoding="utf-8")
+    old = schema.replace("'idle', 'immediate', 'pay_all'", "'idle', 'pay_all'")
+    old = old[:old.index("-- Operator settings")]
+    assert old != schema and "immediate" not in old and "admin_settings" not in old
+    return old
+
+
+def test_init_schema_upgrades_an_old_database(tmp_path):
+    conn = connect(tmp_path / "old.db")
+    conn.executescript(_old_schema())
+    conn.execute("INSERT INTO payment_batches (batch_id, trigger, released_by, started_at, count, total_usd) "
+                 "VALUES ('B-0001', 'pay_all', 'Dana', '2026-01-15T17:00:00', 2, '7750.00')")
+    conn.execute("INSERT INTO audit_log (run_id, ts, event) VALUES ('r-1', '2026-01-01', 'e')")
+    conn.commit()
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO payment_batches (batch_id, trigger, released_by, started_at) "
+                     "VALUES ('B-0002', 'immediate', 'System', 'x')")
+    init_schema(conn)
+    assert set(TABLES) <= _tables(conn) and "payment_batches_new" not in _tables(conn)
+    assert conn.execute("SELECT COUNT(*) FROM admin_settings").fetchone()[0] == 0
+    assert dict(conn.execute("SELECT batch_id, trigger, released_by, count, total_usd FROM payment_batches")
+                .fetchone()) == {"batch_id": "B-0001", "trigger": "pay_all", "released_by": "Dana", "count": 2,
+                                 "total_usd": "7750.00"}
+    assert conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0] == 1
+    conn.execute("INSERT INTO payment_batches (batch_id, trigger, released_by, started_at) "
+                 "VALUES ('B-0002', 'immediate', 'System', 'x')")
+    conn.commit()
+    init_schema(conn)  # repeatable after the rebuild
+    assert conn.execute("SELECT COUNT(*) FROM payment_batches").fetchone()[0] == 2
+    conn.close()
+
+
+def test_fresh_schema_accepts_immediate_and_rejects_unknown_triggers(db):
+    sql = "INSERT INTO payment_batches (batch_id, trigger, released_by, started_at) VALUES (?, ?, 'System', 'x')"
+    db.execute(sql, ("B-0001", "immediate"))
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute(sql, ("B-0002", "cli"))
 
 
 def test_duplicate_idempotency_key_rejected(db):

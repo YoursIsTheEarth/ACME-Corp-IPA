@@ -22,7 +22,7 @@ import {
 } from '../shared/invoice-table/invoice-table.component';
 import { StatusChipComponent } from '../shared/status-chip.component';
 
-export const FINAL_STATUSES = ['Paid', 'Rejected', 'Duplicate', 'Superseded', 'Credit confirmed', 'Revised'];
+export const FINAL_STATUSES = ['Paid', 'Revised', 'Rejected', 'Duplicate', 'Superseded', 'Credit confirmed'];
 
 /** F24: every resolved invoice, the reasoning behind it, and the rationale timeline per row. */
 @Component({

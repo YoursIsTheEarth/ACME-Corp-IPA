@@ -1,5 +1,4 @@
 import shutil
-from datetime import time
 from decimal import Decimal
 from pathlib import Path
 
@@ -29,10 +28,7 @@ def test_catalog_defaults(monkeypatch):
     assert s.fraud_threshold == 0.60
     assert s.vp_review_threshold_usd == Decimal("10000.00")
     assert (s.critic_max_rounds, s.extraction_max_retries, s.validation_max_tool_rounds) == (2, 2, 8)
-    assert s.payment_batch_time == time(17, 0)
-    assert s.payment_tz == "America/Chicago"
-    assert (s.payment_idle_delay_s, s.payment_auto_idle) == (60, True)
-    assert (s.payment_max_attempts, s.payment_lock_timeout_s) == (3, 30)
+    assert (s.payment_idle_delay_s, s.payment_max_attempts, s.payment_lock_timeout_s) == (60, 3, 30)
     assert s.api_cors_origin == "http://localhost:4200"
     assert s.upload_dir == Path("uploads")
     assert s.upload_max_bytes == 10485760
@@ -44,14 +40,14 @@ def test_dotenv_values_load(tmp_path, monkeypatch):
     monkeypatch.delenv("LLM_PROVIDER")
     (tmp_path / ".env").write_text(
         "LLM_PROVIDER=claude\nCLAUDE_MODEL=claude-opus-5-5\nFX_RATES={\"EUR\": \"1.10\"}\n"
-        "ALLOWED_UPLOAD_EXTENSIONS=.pdf, .TXT\nPAYMENT_AUTO_IDLE=false\n"
+        "ALLOWED_UPLOAD_EXTENSIONS=.pdf, .TXT\nPAYMENT_IDLE_DELAY_S=10\n"
     )
     s = get_settings()
     assert s.llm_provider == "claude"
     assert s.claude_model == "claude-opus-5-5"
     assert s.fx_rates == {"EUR": Decimal("1.10")}
     assert s.allowed_upload_extensions == [".pdf", ".txt"]
-    assert s.payment_auto_idle is False
+    assert s.payment_idle_delay_s == 10
     assert get_settings() is s  # cached
 
 
@@ -76,3 +72,14 @@ def test_removed_suspicious_addresses_setting_is_ignored(tmp_path, monkeypatch):
     (tmp_path / ".env").write_text('SUSPICIOUS_ADDRESSES=["1600 Pennsylvania Ave"]\n')
     monkeypatch.setenv("SUSPICIOUS_ADDRESSES", '["1 Main St"]')
     assert not hasattr(get_settings(), "suspicious_addresses")
+
+
+def test_removed_payment_timing_settings_are_ignored(tmp_path, monkeypatch):
+    """Batch timing moved to the admin settings; the old keys in .env or the environment do nothing."""
+    (tmp_path / ".env").write_text("PAYMENT_BATCH_TIME=09:30\nPAYMENT_TZ=America/New_York\n")
+    monkeypatch.setenv("PAYMENT_AUTO_IDLE", "false")
+    s = get_settings()
+    for name in ("payment_batch_time", "payment_tz", "payment_auto_idle"):
+        assert not hasattr(s, name)
+    names = {line.split("=", 1)[0] for line in (REPO_ROOT / ".env.example").read_text().splitlines() if "=" in line}
+    assert not names & {"PAYMENT_BATCH_TIME", "PAYMENT_TZ", "PAYMENT_AUTO_IDLE"}

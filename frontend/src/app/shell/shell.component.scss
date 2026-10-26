@@ -71,6 +71,16 @@
   }
 }
 
+// Pushes the Admin list to the bottom of the sidebar (and of the icon rail).
+.nav-spacer {
+  flex: 1 1 auto;
+}
+
+.admin-nav {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 8px;
+}
+
 .count-pill {
   min-width: 22px;
   padding: 0 7px;

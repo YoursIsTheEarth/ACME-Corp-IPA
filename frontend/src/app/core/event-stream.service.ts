@@ -15,6 +15,7 @@ export const INVALIDATES: Record<EventName, StoreName[]> = {
   'batch.started': ['paymentQueue', 'batches'],
   'payment.created': ['paymentQueue', 'payments', 'stats'],
   'batch.finished': ['paymentQueue', 'payments', 'batches', 'audit', 'stats'],
+  'settings.updated': ['adminSettings', 'paymentQueue'],
 };
 
 export interface ServerEvent {

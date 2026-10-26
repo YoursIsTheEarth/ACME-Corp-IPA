@@ -90,7 +90,7 @@ export class LiveStore<T, P = void> {
   }
 }
 
-export type StoreName = 'queue' | 'review' | 'audit' | 'paymentQueue' | 'payments' | 'batches' | 'stats';
+export type StoreName = 'queue' | 'review' | 'audit' | 'paymentQueue' | 'payments' | 'batches' | 'stats' | 'adminSettings';
 
 /** Every store the app uses, behind the shared tick. */
 @Injectable({ providedIn: 'root' })
@@ -105,12 +105,14 @@ export class Stores {
   readonly payments = new LiveStore<PaymentsResponse, PaymentsFilter>(this.tick$, (f) => this.api.payments(f), {});
   readonly batches = new LiveStore(this.tick$, () => this.api.batches(), undefined);
   readonly stats = new LiveStore(this.tick$, () => this.api.stats(), undefined);
+  /** Payment timing; refreshed by `settings.updated` (another browser or the CLI saved it). */
+  readonly adminSettings = new LiveStore(this.tick$, () => this.api.getAdminSettings(), undefined);
 
   refresh(...names: StoreName[]): void {
     for (const name of names) this[name].refresh();
   }
 
   refreshAll(): void {
-    this.refresh('queue', 'review', 'audit', 'paymentQueue', 'payments', 'batches', 'stats');
+    this.refresh('queue', 'review', 'audit', 'paymentQueue', 'payments', 'batches', 'stats', 'adminSettings');
   }
 }

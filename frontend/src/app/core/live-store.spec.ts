@@ -1,7 +1,9 @@
 import { TestBed, discardPeriodicTasks, fakeAsync, tick } from '@angular/core/testing';
 import { BehaviorSubject, of } from 'rxjs';
 
-import { LiveStore, POLL_MS, PageVisibility, PollTicker } from './live-store';
+import { ApiClient } from './api-client';
+import { AdminSettings } from './api.models';
+import { LiveStore, POLL_MS, PageVisibility, PollTicker, Stores } from './live-store';
 
 describe('LiveStore + PollTicker', () => {
   let visible: BehaviorSubject<boolean>;
@@ -78,6 +80,36 @@ describe('LiveStore + PollTicker', () => {
     expect(lastParam).toBe('b');
     a.unsubscribe();
     b.unsubscribe();
+    discardPeriodicTasks();
+  }));
+});
+
+describe('Stores.adminSettings', () => {
+  const settings: AdminSettings = {
+    delay_payments: true,
+    pay_at_end_of_day: false,
+    end_of_day_time: '17:00',
+    end_of_day_timezone: 'America/Chicago',
+    pay_when_queue_empty: true,
+    updated_by: null,
+    updated_at: null,
+  };
+
+  it('loads the admin settings and reloads them when settings.updated refreshes the store', fakeAsync(() => {
+    let calls = 0;
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: PageVisibility, useValue: { visible$: new BehaviorSubject(true) } },
+        { provide: ApiClient, useValue: { getAdminSettings: () => of({ ...settings, delay_payments: ++calls === 1 }) } },
+      ],
+    });
+    const stores = TestBed.inject(Stores);
+    const seen: boolean[] = [];
+    const sub = stores.adminSettings.data$.subscribe((s) => seen.push(s.delay_payments));
+    expect(seen).toEqual([true]);
+    stores.refresh('adminSettings'); // what EventStreamService does on settings.updated
+    expect(seen).toEqual([true, false]);
+    sub.unsubscribe();
     discardPeriodicTasks();
   }));
 });

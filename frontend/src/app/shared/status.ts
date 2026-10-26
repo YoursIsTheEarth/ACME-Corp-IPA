@@ -36,7 +36,7 @@ export const STATUS_STYLE: Record<Status, StatusStyle> = {
   Duplicate: { label: 'Duplicate', bg: '#eceff1', fg: '#37474f', icon: 'content_copy' },
   Superseded: { label: 'Superseded', bg: '#f3e5f5', fg: '#6a1b9a', icon: 'swap_horiz' },
   'Credit confirmed': { label: 'Credit confirmed', bg: '#e0f2f1', fg: '#004d40', icon: 'savings' },
-  // Backend audit view also lists runs whose revision was handled as a delta payment.
+  // A revision of a paid invoice: its delta was paid, or the same total left nothing due.
   Revised: { label: 'Revised', bg: '#fbe9e7', fg: '#bf360c', icon: 'edit_note' },
 };
 

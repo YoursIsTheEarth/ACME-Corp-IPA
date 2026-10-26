@@ -16,8 +16,8 @@ PING_S = 15
 @router.get("/api/events", response_class=EventSourceResponse)
 async def event_stream(request: Request) -> EventSourceResponse:
     """Events: invoice.created, invoice.stage_changed, invoice.resolved, payment.queued, payment.cancelled,
-    batch.started, payment.created, batch.finished. A `ready` event is sent first. No replay: re-fetch
-    the list endpoints after reconnecting."""
+    batch.started, payment.created, batch.finished, settings.updated (the full admin settings). A `ready`
+    event is sent first. No replay: re-fetch the list endpoints after reconnecting."""
     bus = services(request).bus
     queue = bus.subscribe()
 

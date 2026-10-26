@@ -1,20 +1,27 @@
-"""When a payment batch is due (F38). Pure functions: the caller passes `now` and the snapshot.
+"""When a payment batch is due (F38). Pure functions: the caller passes `now`, the snapshot, and the timing.
 
-    next_batch_time(now, settings)                          # for display
-    end_of_day_due(now, last_eod_run, settings)             # once per day at PAYMENT_BATCH_TIME
-    idle_batch_due(now, runs_snapshot, queue_count, batch_running, settings)
+    next_batch_time(now, timing)                            # for display; None when no end-of-day batch
+    end_of_day_due(now, last_eod_run, timing)               # once per day at the admin end-of-day time
+    idle_batch_due(now, runs_snapshot, queue_count, batch_running, settings, timing)
 
+`timing` is the admin `PaymentTiming` (`acme.admin.load_payment_timing`). End-of-day batches need delay
+and pay at end of day on; idle batches need delay and pay when the Invoice Queue is empty on.
 `load_runs_snapshot(conn)` and `payable_count(conn)` read the inputs for `idle_batch_due` from `acme.db`.
 No scheduler lives here (add-backend-api wires APScheduler).
 """
+
+from __future__ import annotations
 
 import sqlite3
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
+from typing import TYPE_CHECKING
 
 from acme.settings import Settings
+
+if TYPE_CHECKING:
+    from acme.admin import PaymentTiming
 
 PROCESSING_STAGES = frozenset({"Uploaded", "Extracting", "Validating", "Deciding"})
 PROCESSING_STATUSES = PROCESSING_STAGES | {"Resuming"}
@@ -33,23 +40,33 @@ class RunActivity:
         return self.stage in PROCESSING_STAGES or self.status in PROCESSING_STATUSES
 
 
-def _batch_today(now: datetime, settings: Settings) -> datetime:
-    local = now.astimezone(ZoneInfo(settings.payment_tz))
-    return datetime.combine(local.date(), settings.payment_batch_time, tzinfo=local.tzinfo)
+def _batch_today(now: datetime, timing: PaymentTiming) -> datetime:
+    local = now.astimezone(timing.tz)
+    return datetime.combine(local.date(), timing.batch_time, tzinfo=local.tzinfo)
 
 
-def next_batch_time(now: datetime, settings: Settings) -> datetime:
-    """The next end-of-day batch time, in `PAYMENT_TZ` (today if not yet passed, else tomorrow)."""
-    today = _batch_today(now, settings)
+def next_batch_time(now: datetime, timing: PaymentTiming) -> datetime | None:
+    """The next end-of-day batch time in the admin timezone (today if not yet passed, else tomorrow).
+
+    None when no end-of-day batch is scheduled (delay off, or pay at end of day off).
+    """
+    if not timing.end_of_day_on:
+        return None
+    today = _batch_today(now, timing)
     if now < today:
         return today
-    local = now.astimezone(ZoneInfo(settings.payment_tz))
-    return datetime.combine(local.date() + timedelta(days=1), settings.payment_batch_time, tzinfo=local.tzinfo)
+    local = now.astimezone(timing.tz)
+    return datetime.combine(local.date() + timedelta(days=1), timing.batch_time, tzinfo=local.tzinfo)
 
 
-def end_of_day_due(now: datetime, last_eod_run: datetime | None, settings: Settings) -> bool:
-    """True once per local day, at or after `PAYMENT_BATCH_TIME`, if today's batch hasn't run yet."""
-    today = _batch_today(now, settings)
+def end_of_day_due(now: datetime, last_eod_run: datetime | None, timing: PaymentTiming) -> bool:
+    """True once per local day, at or after the end-of-day time, if today's batch hasn't run yet.
+
+    Never due unless delay and pay at end of day are on.
+    """
+    if not timing.end_of_day_on:
+        return False
+    today = _batch_today(now, timing)
     return now >= today and (last_eod_run is None or last_eod_run < today)
 
 
@@ -59,12 +76,14 @@ def idle_batch_due(
     queue_count: int,
     batch_running: bool,
     settings: Settings,
+    timing: PaymentTiming,
 ) -> bool:
-    """Auto-idle on, rows payable, no batch running, and nothing processing for `PAYMENT_IDLE_DELAY_S`.
+    """Delay and pay-when-queue-empty on, rows payable, no batch running, and nothing processing for
+    `PAYMENT_IDLE_DELAY_S`.
 
     Runs Awaiting review (or resolved) never block; only their last change counts toward the delay.
     """
-    if not settings.payment_auto_idle or queue_count <= 0 or batch_running:
+    if not timing.idle_on or queue_count <= 0 or batch_running:
         return False
     runs = list(runs_snapshot)
     if any(run.processing for run in runs):

@@ -9,19 +9,18 @@ ENDPOINTS = {
     ("get", "/api/invoices/{run_id}"), ("get", "/api/invoices/{run_id}/file"),
     ("post", "/api/invoices/{run_id}/review"), ("get", "/api/payments"), ("get", "/api/payments.csv"),
     ("get", "/api/payment-queue"), ("post", "/api/payment-queue/execute"), ("get", "/api/payment-batches"),
-    ("get", "/api/stats"), ("get", "/api/events"),
+    ("get", "/api/stats"), ("get", "/api/events"), ("get", "/api/admin/settings"), ("put", "/api/admin/settings"),
 }
 
 
 def test_api_settings_defaults(monkeypatch):
-    for name in ("UPLOAD_DIR", "PAYMENT_AUTO_IDLE"):
-        monkeypatch.delenv(name)
+    monkeypatch.delenv("UPLOAD_DIR")
     get_settings.cache_clear()
     s = get_settings()
     assert s.api_cors_origin == "http://localhost:4200"
     assert s.upload_dir == Path("uploads") and s.upload_max_bytes == 10 * 1024 * 1024
     assert s.allowed_upload_extensions == [".pdf", ".txt", ".csv", ".json", ".xml", ".eml"]
-    assert s.worker_concurrency == 1 and s.payment_auto_idle is True
+    assert s.worker_concurrency == 1 and not hasattr(s, "payment_auto_idle")
 
 
 def test_cors_allows_the_angular_dev_server(client):

@@ -5,7 +5,6 @@ Field names are lowercase; the matching environment variables are the
 uppercase names (e.g. `llm_provider` <- `LLM_PROVIDER`).
 """
 
-from datetime import time
 from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
@@ -60,11 +59,8 @@ class Settings(BaseSettings):
     extraction_max_retries: int = 2
     validation_max_tool_rounds: int = 8
 
-    # Payments
-    payment_batch_time: time = time(17, 0)
-    payment_tz: str = "America/Chicago"
+    # Payments (batch timing lives in the admin settings, `acme.admin`)
     payment_idle_delay_s: int = 60
-    payment_auto_idle: bool = True
     payment_max_attempts: int = 3
     payment_lock_timeout_s: int = 30
 

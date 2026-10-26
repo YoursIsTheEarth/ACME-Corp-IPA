@@ -1,6 +1,6 @@
-<ng-template #navList let-labels="labels">
-  <mat-nav-list class="nav">
-    @for (item of items; track item.path) {
+<ng-template #navList let-labels="labels" let-list="items" let-kind="kind">
+  <mat-nav-list [class]="'nav ' + kind + '-nav'" [attr.data-testid]="kind + '-nav'">
+    @for (item of list; track item.path) {
       <a
         mat-list-item
         [routerLink]="item.path"
@@ -51,7 +51,9 @@
         <div class="tagline">Invoice Processing Automation</div>
       </div>
     </div>
-    <ng-container *ngTemplateOutlet="navList; context: { labels: true }" />
+    <ng-container *ngTemplateOutlet="navList; context: { labels: true, items: items, kind: 'main' }" />
+    <div class="nav-spacer"></div>
+    <ng-container *ngTemplateOutlet="navList; context: { labels: true, items: adminItems, kind: 'admin' }" />
     <div class="sidebar-footer" data-testid="llm-footer">
       <div class="live" [class.on]="live()">
         <span class="dot"></span>{{ live() ? 'Live' : 'Polling every 3 s' }}
@@ -87,7 +89,9 @@
         <button mat-icon-button type="button" (click)="toggleNav()" aria-label="Open menu" data-testid="menu-toggle">
           <mat-icon>menu</mat-icon>
         </button>
-        <ng-container *ngTemplateOutlet="navList; context: { labels: false }" />
+        <ng-container *ngTemplateOutlet="navList; context: { labels: false, items: items, kind: 'main' }" />
+        <div class="nav-spacer"></div>
+        <ng-container *ngTemplateOutlet="navList; context: { labels: false, items: adminItems, kind: 'admin' }" />
       </div>
     }
     <main class="main">

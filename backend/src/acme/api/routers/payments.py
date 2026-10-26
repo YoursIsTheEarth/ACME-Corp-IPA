@@ -22,7 +22,7 @@ PAYMENTS_CSV_COLUMNS = ("payment_id", "invoice_number", "revision", "vendor", "a
 @router.get("/api/payments")
 def list_payments(date_from: date | None = None, date_to: date | None = None,
                   vendor: str | None = None) -> dict[str, Any]:
-    """Paid invoices filtered by paid date (PAYMENT_TZ) and vendor (substring), with the filter's total."""
+    """Paid invoices filtered by paid date (admin end-of-day timezone) and vendor (substring), with the filter's total."""
     with db() as conn:
         return queries.payments_view(conn, date_from, date_to, vendor)
 
@@ -44,7 +44,8 @@ def list_batches() -> dict[str, Any]:
 
 @router.get("/api/payment-queue")
 def payment_queue() -> dict[str, Any]:
-    """Rows queued, paying, or failed, with count, total, next batch time, and whether auto-idle is on."""
+    """Rows queued, paying, or failed, with count, total, and the payment mode (delay, next end-of-day batch,
+    pay when the Invoice Queue is empty) from the admin settings."""
     with db() as conn:
         return queries.payment_queue_view(conn)
 

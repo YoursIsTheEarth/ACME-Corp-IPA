@@ -14,6 +14,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from acme import payments, workflow
+from acme.admin import load_payment_timing
 from acme.llm import active_models, key_status
 from acme.logging import read_trace
 from acme.payments._store import row_key
@@ -28,8 +29,8 @@ SEVERITY_RANK = {"CRITICAL": 0, "WARNING": 1, "INFO": 2}
 KEY_FINDINGS = 3
 FINDING_EVENTS = ("validation.findings", "validation.fallback", "rejection.recorded", "invoice.superseded",
                   "extraction_attempt")
-TRIGGER_LABELS = {"end_of_day": "End of day", "idle": "Invoice Queue idle", "pay_all": "Pay all",
-                  "pay_selected": "Pay selected", "pay_now": "Pay now"}
+TRIGGER_LABELS = {"end_of_day": "End of day", "idle": "Invoice Queue idle", "immediate": "Immediate (at approval)",
+                  "pay_all": "Pay all", "pay_selected": "Pay selected", "pay_now": "Pay now"}
 CONTENT_TYPES = {".pdf": "application/pdf", ".txt": "text/plain", ".csv": "text/csv",
                  ".json": "application/json", ".xml": "application/xml", ".eml": "message/rfc822"}
 
@@ -51,9 +52,10 @@ def _parse(ts: str | None) -> datetime | None:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
-def _local_date(ts: str | None) -> date | None:
+def _local_date(ts: str | None, tz: ZoneInfo) -> date | None:
+    """The calendar day of `ts` in `tz` (the admin end-of-day timezone, finance's business day)."""
     value = _parse(ts)
-    return value.astimezone(ZoneInfo(get_settings().payment_tz)).date() if value else None
+    return value.astimezone(tz).date() if value else None
 
 
 def _seconds(start: str | None, end: datetime | None) -> int | None:
@@ -190,9 +192,10 @@ def audit_view(conn: sqlite3.Connection, status: str | None = None, date_from: d
     rows = conn.execute("SELECT * FROM invoice_runs WHERE status = 'Resolved' "
                         "ORDER BY completed_at DESC, id DESC").fetchall()
     statuses = {s.strip().casefold() for s in status.split(",") if s.strip()} if status else set()
+    tz = load_payment_timing(conn).tz
     rows = [r for r in rows
             if (not statuses or (r["final_status"] or "").casefold() in statuses)
-            and _in_range(_local_date(r["completed_at"]), date_from, date_to)
+            and _in_range(_local_date(r["completed_at"], tz), date_from, date_to)
             and (not search or any(_matches(r[c], search) for c in ("file_name", "invoice_number", "vendor")))]
     facts, now = _run_facts(conn, [r["id"] for r in rows]), now_utc()
     result = []
@@ -307,8 +310,9 @@ def payments_view(conn: sqlite3.Connection, date_from: date | None = None, date_
         paid_rows[row_key(q)] = q
     runs = {r["id"]: r for r in conn.execute("SELECT * FROM invoice_runs")}
     batches = {b["batch_id"]: b for b in conn.execute("SELECT * FROM payment_batches")}
+    tz = load_payment_timing(conn).tz
     ledger = [p for p in conn.execute("SELECT * FROM payments ORDER BY paid_at, id")
-              if _matches(p["vendor"], vendor) and _in_range(_local_date(p["paid_at"]), date_from, date_to)]
+              if _matches(p["vendor"], vendor) and _in_range(_local_date(p["paid_at"], tz), date_from, date_to)]
     queue_of = {p["id"]: paid_rows.get(p["idempotency_key"]) for p in ledger}
     currency = _currency_by_run(conn, sorted({q["run_id"] for q in queue_of.values() if q is not None}))
     rows = []
@@ -356,8 +360,9 @@ def _batch_label(when: datetime, now: datetime, tz_name: str) -> str:
 
 
 def payment_queue_view(conn: sqlite3.Connection, now: datetime | None = None) -> dict[str, Any]:
-    """Rows queued, paying, or failed (F40), with count, total, next batch time, and the auto-idle flag."""
-    settings, now = get_settings(), now or now_utc()
+    """Rows queued, paying, or failed (F40), with count, total, and the payment mode from the admin settings:
+    delay on or off, the next end-of-day batch (null when none is scheduled), and pay when queue empty."""
+    settings, timing, now = get_settings(), load_payment_timing(conn), now or now_utc()
     rows = [{
         "id": r["id"], "run_id": r["run_id"], "file_name": r["file_name"], "invoice_number": r["invoice_number"],
         "revision": r["revision"], "vendor": r["vendor"], "amount_usd": _money(r["amount_usd"]), "kind": r["kind"],
@@ -366,11 +371,13 @@ def payment_queue_view(conn: sqlite3.Connection, now: datetime | None = None) ->
     } for r in conn.execute(
         f"SELECT q.*, r.decided_by, r.file_name FROM payment_queue q LEFT JOIN invoice_runs r ON r.id = q.run_id "
         f"WHERE q.status IN ({_marks(OPEN_PAYMENT_STATUSES)}) ORDER BY q.id", OPEN_PAYMENT_STATUSES)]
-    next_batch = payments.next_batch_time(now, settings)
+    next_batch = payments.next_batch_time(now, timing)
     return {
         "rows": rows, "count": len(rows), "total_usd": _sum(r["amount_usd"] for r in rows),
-        "next_batch_at": next_batch.isoformat(), "next_batch_label": _batch_label(next_batch, now, settings.payment_tz),
-        "timezone": settings.payment_tz, "auto_idle": settings.payment_auto_idle,
+        "delay_payments": timing.delay_payments, "pay_at_end_of_day": timing.pay_at_end_of_day,
+        "next_batch_at": next_batch.isoformat() if next_batch else None,
+        "next_batch_label": _batch_label(next_batch, now, timing.end_of_day_timezone) if next_batch else None,
+        "timezone": timing.end_of_day_timezone, "pay_when_queue_empty": timing.pay_when_queue_empty,
         "idle_delay_s": settings.payment_idle_delay_s, "batch_running": payments.is_batch_running(),
         "server_time": server_time(),
     }
@@ -389,8 +396,9 @@ def llm_info() -> dict[str, Any]:
 
 
 def stats(conn: sqlite3.Connection) -> dict[str, Any]:
-    """Badge and tile counts (F21, F31). "Today" is the local day in PAYMENT_TZ."""
-    today = _local_date(now_utc().isoformat())
+    """Badge and tile counts (F21, F31). "Today" is the local day in the admin end-of-day timezone."""
+    tz = load_payment_timing(conn).tz
+    today = _local_date(now_utc().isoformat(), tz)
     runs = conn.execute("SELECT stage, status, final_status, total_usd, completed_at FROM invoice_runs").fetchall()
     open_rows = conn.execute(f"SELECT amount_usd FROM payment_queue WHERE status IN "
                              f"({_marks(OPEN_PAYMENT_STATUSES)})", OPEN_PAYMENT_STATUSES).fetchall()
@@ -401,8 +409,8 @@ def stats(conn: sqlite3.Connection) -> dict[str, Any]:
         "processing": sum(r["stage"] in PROCESSING_STAGES for r in runs),
         "awaiting_review": sum(r["status"] == "Awaiting review" for r in runs),
         "payment_queue": len(open_rows),
-        "paid_today": sum(_local_date(p["paid_at"]) == today for p in ledger),
-        "rejected_today": sum(_local_date(r["completed_at"]) == today for r in rejected),
+        "paid_today": sum(_local_date(p["paid_at"], tz) == today for p in ledger),
+        "rejected_today": sum(_local_date(r["completed_at"], tz) == today for r in rejected),
         "dollars_queued": _sum(r["amount_usd"] for r in open_rows),
         "dollars_paid": _sum(p["amount_usd"] for p in ledger),
         "dollars_blocked": _sum(r["total_usd"] for r in rejected),

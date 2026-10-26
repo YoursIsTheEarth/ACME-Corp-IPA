@@ -65,6 +65,18 @@ describe('EventStreamService', () => {
     expect(refreshed[1]).toEqual(jasmine.arrayContaining(['queue', 'review', 'stats', 'paymentQueue', 'payments', 'batches']));
   }));
 
+  it('refreshes the admin settings and payment queue on settings.updated', fakeAsync(() => {
+    service.connect();
+    const es = FakeEventSource.instances[0];
+    es.emit('ready');
+    const seen: unknown[] = [];
+    service.events$.subscribe((e) => seen.push(e));
+    es.emit('settings.updated', { delay_payments: false, updated_by: 'Dana' });
+    expect(seen).toEqual([{ name: 'settings.updated', data: { delay_payments: false, updated_by: 'Dana' } }]);
+    tick(100);
+    expect(refreshed[1].sort()).toEqual(['adminSettings', 'paymentQueue']);
+  }));
+
   it('falls back to polling on error and reconnects with backoff', fakeAsync(() => {
     service.connect();
     FakeEventSource.instances[0].emit('ready');

@@ -74,8 +74,15 @@ working. An invalid `LLM_PROVIDER` still stops startup.
 | `UPLOAD_MAX_BYTES` | `10485760` | Per file (10 MB); empty files are refused too |
 | `ALLOWED_UPLOAD_EXTENSIONS` | `.pdf,.txt,.csv,.json,.xml,.eml` | |
 | `WORKER_CONCURRENCY` | `1` | Invoices process one at a time, in upload order |
-| `PAYMENT_BATCH_TIME` / `PAYMENT_TZ` | `17:00` / `America/Chicago` | Daily `end_of_day` batch |
-| `PAYMENT_IDLE_DELAY_S` / `PAYMENT_AUTO_IDLE` | `60` / `true` | `idle` batch once nothing has been processing for the delay (checked every 5 s) |
+| `PAYMENT_IDLE_DELAY_S` | `60` | `idle` batch once nothing has been processing for the delay (checked every 5 s); also the wait before an `immediate` batch retries a failed payment |
+
+Payment timing is not in `.env`: it lives in the `admin_settings` table and is changed on the Admin page,
+with `PUT /api/admin/settings`, or with `python main.py admin set`, and applies without a restart.
+`PAYMENT_BATCH_TIME`, `PAYMENT_TZ`, and `PAYMENT_AUTO_IDLE` were removed and are ignored if still set.
+The defaults are delay on, pay at end of day off (17:00 America/Chicago once turned on), and pay when the
+Invoice Queue is empty on. With delay off, each approved invoice is paid at approval by an `immediate`
+batch (released by System); a row approved while another batch runs is paid right after it, and the
+5-second check retries failed rows after `PAYMENT_IDLE_DELAY_S`.
 
 Money is a 2-decimal string (`"7750.00"`); timestamps are ISO 8601 UTC. Errors use FastAPI's
 `{"detail": ...}`; a 409 carries `{"detail": {"message", "status"}}`, and a 503 with no LLM key carries
@@ -86,17 +93,29 @@ Money is a 2-decimal string (`"7750.00"`); timestamps are ISO 8601 UTC. Errors u
 | --- | --- |
 | `POST /api/invoices` | Multipart, field `files` (repeat per file; `file` also accepted). 202 → `{files: [{id, file_name, status: "Uploaded" \| "rejected", size, error}], accepted, rejected, server_time}`. 422 with no files; 503 `llm_not_configured` (nothing stored, no run created) while no LLM key is set |
 | `GET /api/invoices?view=queue` | `{view, rows, count, server_time}`. Unresolved runs; row: `id, file_name, format, invoice_number, vendor, amount_usd, stage, status` (Processing, Retrying extraction, Awaiting review), `run_status, uploaded_at, stage_entered_at, time_in_stage_s, final_status, decided_by, completed_at, processing_s` |
-| `GET /api/invoices?view=audit` | Resolved runs, newest first. Filters `status` (comma list), `date_from`, `date_to` (YYYY-MM-DD, completed date in PAYMENT_TZ), `search` (file, number, vendor). Adds `key_findings` (≤ 3 `{code, severity, message}`), `findings_count` |
+| `GET /api/invoices?view=audit` | Resolved runs, newest first (final status Paid, Revised, Rejected, Duplicate, Superseded, Credit confirmed). Filters `status` (comma list), `date_from`, `date_to` (YYYY-MM-DD, completed date in the admin end-of-day timezone), `search` (file, number, vendor). Adds `key_findings` (≤ 3 `{code, severity, message}`), `findings_count` |
 | `GET /api/invoices?view=review` | Held runs. Adds `hold_kind` (warning, credit, payment_failure), `reason` ("Payment failed" for payment failures), `detail, last_error, attempts, findings, ai_recommendation, ai_rationale, overpaid_usd, paid_amount_usd, waiting_since, waiting_s` |
 | `GET /api/invoices/{id}` | Row fields plus `invoice, extracted, findings, decision, drafts, critiques` (each with `provider`, `model`), `reviews, hold, payment_queue, payments, rejection, timeline` (audit ledger). 404 if unknown |
 | `GET /api/invoices/{id}/file` | Original bytes, content type from the extension (`application/pdf`, `text/plain`, ...). 404 if unknown |
 | `POST /api/invoices/{id}/review` | `{decision: "approve" \| "reject", reviewer (1-50 trimmed), rationale (≥ 15)}`. 200 → `{id, decision, reviewer, status: "Resuming"}`; the run resumes on the worker. 422 bad input, 409 not awaiting review, 404 unknown. Credit holds: approve = Credit confirmed, reject = Reject revision |
-| `GET /api/payment-queue` | `{rows, count, total_usd, next_batch_at, next_batch_label ("Today 5:00 PM CT"), timezone, auto_idle, idle_delay_s, batch_running, server_time}`; row: `id, run_id, file_name, invoice_number, revision, vendor, amount_usd, kind (full, replacement, delta), approved_by, queued_at, status (queued, paying, failed), attempts, last_error, batch_id` |
+| `GET /api/payment-queue` | `{rows, count, total_usd, delay_payments, pay_at_end_of_day, next_batch_at, next_batch_label ("Today 5:00 PM CT"; both null when no end-of-day batch is scheduled), timezone, pay_when_queue_empty, idle_delay_s, batch_running, server_time}`; row: `id, run_id, file_name, invoice_number, revision, vendor, amount_usd, kind (full, replacement, delta), approved_by, queued_at, status (queued, paying, failed), attempts, last_error, batch_id` |
 | `POST /api/payment-queue/execute` | `{ids?: [row id], released_by (1-50 trimmed)}`: no ids = Pay all, one = Pay now, several = Pay selected (an empty list is 422). 202 → `{batch_id, trigger, released_by}`; 409 while a batch runs |
 | `GET /api/payments` | Filters `date_from`, `date_to`, `vendor` (substring). `{rows, count, total_usd, server_time}`; row: `payment_id, run_id, file_name, invoice_number, revision, vendor, amount_usd, original_amount, original_currency, kind, delta_label ("Delta for R1"), invoice_total_usd, approved_by, paid_at, idempotency_key, batch_id, batch_trigger, batch_trigger_label, released_by` |
-| `GET /api/payment-batches` | `{rows, count, server_time}`, newest first; row: `batch_id, trigger, trigger_label, released_by, started_at, finished_at, running, count, total_usd, failed_count` |
+| `GET /api/payment-batches` | `{rows, count, server_time}`, newest first; row: `batch_id, trigger` (`end_of_day`, `idle`, `immediate`, `pay_all`, `pay_selected`, `pay_now`), `trigger_label, released_by, started_at, finished_at, running, count, total_usd, failed_count` |
+| `GET /api/admin/settings` | `{delay_payments, pay_at_end_of_day, end_of_day_time ("17:00"), end_of_day_timezone ("America/Chicago"), pay_when_queue_empty, updated_by, updated_at}`; defaults for anything never saved, `updated_by`/`updated_at` null until the first save. No LLM key needed |
+| `PUT /api/admin/settings` | All five settings plus `updated_by` (1-50 trimmed). 200 → the saved settings; applied at once (the `end_of_day` job is rescheduled or removed) and audited with old and new values. 422 naming the field for a bad `end_of_day_time` (24-hour HH:MM), an unknown IANA `end_of_day_timezone`, or a bad name; nothing is saved. Turning delay off pays everything queued in one `immediate` batch. No LLM key needed |
 | `GET /api/stats` | `in_queue, processing, awaiting_review, payment_queue, paid_today, rejected_today, dollars_queued, dollars_paid, dollars_blocked, duplicates_caught, llm: {provider, model, roles, configured, missing_key}, server_time`. `configured` is false while a needed key is missing; `missing_key` names it (`XAI_API_KEY`, `ANTHROPIC_API_KEY`) or is null |
-| `GET /api/events` | SSE: `ready`, `invoice.created`, `invoice.stage_changed`, `invoice.resolved` (data: `run_id, stage, status, final_status, invoice` = the list row), `payment.queued`, `payment.cancelled`, `batch.started`, `payment.created`, `batch.finished` (`count, total_usd, failed_count, results`). Ping every 15 s; no replay |
+| `GET /api/events` | SSE: `ready`, `invoice.created`, `invoice.stage_changed`, `invoice.resolved` (data: `run_id, stage, status, final_status, invoice` = the list row), `payment.queued`, `payment.cancelled`, `batch.started`, `payment.created`, `batch.finished` (`count, total_usd, failed_count, results`), `settings.updated` (the full admin settings). Ping every 15 s; no replay |
 | `GET /api/invoices.csv`, `GET /api/payments.csv` | CSV of the audit view and payments, same filters as the JSON endpoints |
+
+Payment timing from the shell (the server on port 8000):
+
+```bash
+curl -s localhost:8000/api/admin/settings
+curl -s -X PUT localhost:8000/api/admin/settings -H 'Content-Type: application/json' \
+  -d '{"delay_payments": true, "pay_at_end_of_day": true, "end_of_day_time": "17:00",
+       "end_of_day_timezone": "America/Chicago", "pay_when_queue_empty": true, "updated_by": "Dana"}'
+curl -s localhost:8000/api/payment-queue    # delay_payments, next_batch_label "Today 5:00 PM CT", ...
+```
 
 API tests live in `backend/tests/api/` (`pytest backend/tests/api`).

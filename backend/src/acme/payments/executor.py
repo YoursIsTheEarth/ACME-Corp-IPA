@@ -2,6 +2,7 @@
 
     result = run_batch("pay_all", "Dana")            # raises BatchAlreadyRunning if one is running
     run_batch("pay_selected", "Dana", ids=[3, 5])
+    pay_now_if_immediate()                             # delay off: an `immediate` batch of what is payable now
     recover_interrupted_batch()                        # at startup, before any batch
     resume_payment_failure(run_id, approve=True)       # decision on a payment-failure hold
 """
@@ -9,6 +10,7 @@
 import logging
 import sqlite3
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Literal
 
@@ -23,9 +25,9 @@ from acme.settings import get_settings
 log = logging.getLogger(__name__)
 
 AGENT = "payment_executor"
-TRIGGERS = ("end_of_day", "idle", "pay_all", "pay_selected", "pay_now")
-SYSTEM_TRIGGERS = ("end_of_day", "idle")
-Trigger = Literal["end_of_day", "idle", "pay_all", "pay_selected", "pay_now"]
+TRIGGERS = ("end_of_day", "idle", "immediate", "pay_all", "pay_selected", "pay_now")
+SYSTEM_TRIGGERS = ("end_of_day", "idle", "immediate")
+Trigger = Literal["end_of_day", "idle", "immediate", "pay_all", "pay_selected", "pay_now"]
 
 
 class BatchAlreadyRunning(RuntimeError):
@@ -74,11 +76,13 @@ def _released_by(trigger: str, released_by: str | None) -> str:
 
 
 def run_batch(trigger: Trigger, released_by: str | None = None, ids: list[int] | None = None) -> BatchResult:
-    """Run one batch. `end_of_day`, `idle`, `pay_all` take every payable row; `pay_selected`/`pay_now` only `ids`.
+    """Run one batch. `end_of_day`, `idle`, `pay_all` take every payable row; `pay_selected`/`pay_now` only `ids`;
+    `immediate` every `queued` row plus `failed` ones last tried at least `PAYMENT_IDLE_DELAY_S` ago.
 
     Payable: `queued`, or `failed` with attempts left. Selected rows move to `paying` under
     `BEGIN IMMEDIATE`, then each is re-checked, paid once via `mock_payment`, and written to `payments`.
     Always writes a `payment_batches` record (per-row results go to the `batch.finished` audit event).
+    Afterwards, with payment delay off, rows that became payable meanwhile are paid by an `immediate` batch.
     """
     name = _released_by(trigger, released_by)
     scoped = trigger in ("pay_selected", "pay_now")
@@ -89,11 +93,50 @@ def run_batch(trigger: Trigger, released_by: str | None = None, ids: list[int] |
     try:
         conn = connect()
         try:
-            return _run(conn, trigger, name, list(ids) if scoped else None)
+            result = _run(conn, trigger, name, list(ids) if scoped else None)
         finally:
             conn.close()
     finally:
         BATCH_LOCK.release()
+    pay_now_if_immediate()  # drain: rows approved while this batch ran
+    return result
+
+
+def immediate_scope(conn: sqlite3.Connection, max_attempts: int) -> list[int]:
+    """The `immediate` scope: every `queued` row, plus `failed` rows with attempts left whose last attempt
+    (their batch's finish) was at least `PAYMENT_IDLE_DELAY_S` ago."""
+    wait = timedelta(seconds=get_settings().payment_idle_delay_s)
+    cutoff = (datetime.now(timezone.utc) - wait).isoformat(timespec="microseconds")
+    rows = conn.execute(
+        "SELECT q.id FROM payment_queue q LEFT JOIN payment_batches b ON b.batch_id = q.batch_id "
+        "WHERE q.status = 'queued' OR (q.status = 'failed' AND q.attempts < ? "
+        "AND (b.batch_id IS NULL OR COALESCE(b.finished_at, b.started_at) <= ?)) ORDER BY q.id",
+        (max_attempts, cutoff))
+    return [r["id"] for r in rows.fetchall()]
+
+
+def pay_now_if_immediate(conn: sqlite3.Connection | None = None) -> BatchResult | None:
+    """With payment delay off and rows payable under the `immediate` scope, run an `immediate` batch.
+
+    Returns None when delay is on, nothing is payable, or another batch is running (`BatchAlreadyRunning`):
+    that batch pays the rows when it finishes. Released by System.
+    """
+    from acme.admin import load_payment_timing  # acme.admin imports this package
+
+    own = conn is None
+    conn = conn or connect()
+    try:
+        if load_payment_timing(conn).delay_payments:
+            return None
+        if not immediate_scope(conn, get_settings().payment_max_attempts):
+            return None
+    finally:
+        if own:
+            conn.close()
+    try:
+        return run_batch("immediate")
+    except BatchAlreadyRunning:
+        return None
 
 
 def _run(conn: sqlite3.Connection, trigger: str, released_by: str, ids: list[int] | None) -> BatchResult:
@@ -106,13 +149,16 @@ def _run(conn: sqlite3.Connection, trigger: str, released_by: str, ids: list[int
         conn.execute("INSERT INTO payment_batches (batch_id, trigger, released_by, started_at) VALUES (?, ?, ?, ?)",
                      (batch_id, trigger, released_by, started_at))
         payable = "(status = 'queued' OR (status = 'failed' AND attempts < ?))"
-        if ids is None:
+        if trigger == "immediate":
+            selected = immediate_scope(conn, max_attempts)
+        elif ids is None:
             rows = conn.execute(f"SELECT id FROM payment_queue WHERE {payable} ORDER BY id", (max_attempts,))
+            selected = [r["id"] for r in rows.fetchall()]
         else:
             marks = ",".join("?" * len(ids))
             rows = conn.execute(f"SELECT id FROM payment_queue WHERE {payable} AND id IN ({marks}) ORDER BY id",
                                 (max_attempts, *ids))
-        selected = [r["id"] for r in rows.fetchall()]
+            selected = [r["id"] for r in rows.fetchall()]
         results += [RowResult(i, "skipped", error="not queued or failed") for i in (ids or []) if i not in selected]
         conn.executemany("UPDATE payment_queue SET status = 'paying', batch_id = ? WHERE id = ?",
                          [(batch_id, row_id) for row_id in selected])

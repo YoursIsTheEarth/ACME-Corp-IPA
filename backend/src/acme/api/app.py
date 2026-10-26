@@ -17,7 +17,7 @@ from acme import payments, workflow
 from acme.api import queries
 from acme.api.deps import Services
 from acme.api.events import EventBus
-from acme.api.routers import events, invoices, payments as payment_routes, reviews, stats
+from acme.api.routers import admin, events, invoices, payments as payment_routes, reviews, stats
 from acme.api.scheduler import BatchRunner, PaymentScheduler
 from acme.api.worker import Worker
 from acme.db import connect, init_schema
@@ -114,6 +114,6 @@ def create_app(enable_scheduler: bool = True) -> FastAPI:
                   description="Invoice Processing Automation: upload, review, and pay invoices.")
     app.add_middleware(CORSMiddleware, allow_origins=[settings.api_cors_origin], allow_credentials=False,
                        allow_methods=["*"], allow_headers=["*"])
-    for module in (invoices, reviews, payment_routes, stats, events):
+    for module in (invoices, reviews, payment_routes, stats, admin, events):
         app.include_router(module.router)
     return app

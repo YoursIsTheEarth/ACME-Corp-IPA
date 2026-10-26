@@ -64,7 +64,7 @@ def summarize_runs(run_ids: list[str]) -> Summary:
 def render_markdown(summary: Summary) -> str:
     counts = [
         ("Invoices processed", summary.runs), ("Paid", summary.paid), ("Queued for payment", summary.queued),
-        ("Superseded", summary.superseded), ("Revised (no payment due)", summary.revised),
+        ("Superseded", summary.superseded), ("Revised", summary.revised),
         ("Credit confirmed", summary.credit_confirmed), ("Held for review", summary.held),
         ("Rejected", summary.rejected), ("Duplicates caught", summary.duplicates),
     ]

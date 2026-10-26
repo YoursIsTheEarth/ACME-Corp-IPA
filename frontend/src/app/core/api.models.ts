@@ -192,12 +192,37 @@ export interface PaymentQueueRow {
 
 export interface PaymentQueueResponse extends ListResponse<PaymentQueueRow> {
   total_usd: Money;
-  next_batch_at: string;
-  next_batch_label: string;
+  /** Payment mode from the admin settings. */
+  delay_payments: boolean;
+  pay_at_end_of_day: boolean;
+  /** Null when no end-of-day batch is scheduled (delay off, or pay at end of day off). */
+  next_batch_at: string | null;
+  next_batch_label: string | null;
   timezone: string;
-  auto_idle: boolean;
+  pay_when_queue_empty: boolean;
   idle_delay_s: number;
   batch_running: boolean;
+}
+
+/** `GET /api/admin/settings`: payment timing (F41). Unsaved values are the defaults. */
+export interface PaymentTimingSettings {
+  delay_payments: boolean;
+  pay_at_end_of_day: boolean;
+  /** 24-hour `HH:MM`, default `17:00`. */
+  end_of_day_time: string;
+  /** IANA name, default `America/Chicago`. */
+  end_of_day_timezone: string;
+  pay_when_queue_empty: boolean;
+}
+
+export interface AdminSettings extends PaymentTimingSettings {
+  updated_by: string | null;
+  updated_at: string | null;
+}
+
+/** `PUT /api/admin/settings`: all five settings and who saves them (1 to 50 characters after trimming). */
+export interface AdminSettingsRequest extends PaymentTimingSettings {
+  updated_by: string;
 }
 
 export interface ExecuteRequest {
@@ -211,7 +236,7 @@ export interface ExecuteResponse {
   released_by: string;
 }
 
-export type BatchTrigger = 'end_of_day' | 'idle' | 'pay_all' | 'pay_selected' | 'pay_now';
+export type BatchTrigger = 'end_of_day' | 'idle' | 'immediate' | 'pay_all' | 'pay_selected' | 'pay_now';
 
 export interface PaymentRow {
   payment_id: string | null;
@@ -289,6 +314,7 @@ export const EVENT_NAMES = [
   'batch.started',
   'batch.finished',
   'payment.created',
+  'settings.updated',
 ] as const;
 export type EventName = (typeof EVENT_NAMES)[number];
 
