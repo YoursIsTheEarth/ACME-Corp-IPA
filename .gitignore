@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+backend/.venv/
+.pytest_cache/
+
+# Local state
+.env
+acme.db
+*.db
+*.db-wal
+*.db-shm
+uploads/
+
+# Frontend
+node_modules/
+frontend/dist/
+frontend/.angular/
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/

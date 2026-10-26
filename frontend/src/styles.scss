@@ -1,0 +1,159 @@
+@use '@angular/material' as mat;
+
+// ACME Corp IPA theme: Material 3, azure primary, light only (dark theme is a non-goal).
+html {
+  @include mat.core();
+  @include mat.all-component-themes(
+    mat.define-theme(
+      (
+        color: (
+          theme-type: light,
+          primary: mat.$azure-palette,
+          tertiary: mat.$blue-palette,
+        ),
+        typography: (
+          brand-family: 'Inter, Roboto, "Segoe UI", system-ui, sans-serif',
+          plain-family: 'Inter, Roboto, "Segoe UI", system-ui, sans-serif',
+        ),
+        density: (
+          scale: -1,
+        ),
+      )
+    )
+  );
+
+  --ipa-bg: #f5f7fb;
+  --ipa-surface: #ffffff;
+  --ipa-subtle: #f8f9fc;
+  --ipa-border: #e3e7ef;
+  --ipa-hover: #f2f5fb;
+  --ipa-selected: #e8f0fe;
+  --ipa-muted: #5f6b7a;
+  --ipa-text: #1d2433;
+  --ipa-accent: #1565c0;
+  --ipa-sidebar: #0f1e3a;
+  --ipa-sidebar-text: #c9d4ea;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, Roboto, 'Segoe UI', system-ui, sans-serif;
+  background: var(--ipa-bg);
+  color: var(--ipa-text);
+}
+
+a {
+  color: var(--ipa-accent);
+}
+
+// Page scaffolding shared by every page.
+.page {
+  padding: 24px clamp(16px, 3vw, 32px) 48px;
+  max-width: 1440px;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px;
+  margin-bottom: 20px;
+
+  h1 {
+    margin: 0;
+    font-size: 24px;
+    font-weight: 600;
+  }
+
+  p {
+    margin: 4px 0 0;
+    color: var(--ipa-muted);
+  }
+
+  .spacer {
+    flex: 1;
+  }
+}
+
+.muted {
+  color: var(--ipa-muted);
+}
+
+.small {
+  font-size: 12px;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.mono {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.finding-chip {
+  display: inline-block;
+  margin: 2px 4px 2px 0;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  background: #eef1f6;
+  color: #37474f;
+  white-space: nowrap;
+
+  &.critical {
+    background: #fdecea;
+    color: #a61b1b;
+  }
+
+  &.warning {
+    background: #fff4e0;
+    color: #8a5a00;
+  }
+
+  &.more {
+    background: transparent;
+    border: 1px dashed #b0bac9;
+  }
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+
+  mat-form-field {
+    width: 200px;
+  }
+}
+
+.toast-error {
+  --mdc-snackbar-container-color: #8e1b1b;
+}
+
+.mat-mdc-dialog-content .summary {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin-bottom: 12px;
+}
+
+.mat-mdc-button-base {
+  white-space: nowrap;
+}

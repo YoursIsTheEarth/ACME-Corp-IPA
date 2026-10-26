@@ -1,0 +1,69 @@
+<div class="page">
+  <header class="hero">
+    <h1>Welcome to ACME Corp IPA</h1>
+    <p>Drop invoices in and AI agents extract, validate, and approve them, then queue approved ones for payment, with every decision explained.</p>
+  </header>
+
+  <section class="tiles" data-testid="tiles">
+    <a class="tile" routerLink="/queue" data-testid="tile-in-queue">
+      <mat-icon>inbox</mat-icon>
+      <span class="n">{{ stats()?.in_queue ?? '—' }}</span><span class="l">In queue</span>
+    </a>
+    <a class="tile warn" routerLink="/review" data-testid="tile-awaiting-review">
+      <mat-icon>gavel</mat-icon>
+      <span class="n">{{ stats()?.awaiting_review ?? '—' }}</span><span class="l">Awaiting review</span>
+    </a>
+    <a class="tile ok" routerLink="/payments" data-testid="tile-paid-today">
+      <mat-icon>paid</mat-icon>
+      <span class="n">{{ stats()?.paid_today ?? '—' }}</span><span class="l">Paid today</span>
+    </a>
+    <a class="tile bad" routerLink="/audit" [queryParams]="{ status: 'Rejected' }" data-testid="tile-rejected-today">
+      <mat-icon>block</mat-icon>
+      <span class="n">{{ stats()?.rejected_today ?? '—' }}</span><span class="l">Rejected today</span>
+    </a>
+  </section>
+
+  <app-drop-zone (files)="onFiles($event)" />
+
+  @if (items().length) {
+    <section class="uploads" data-testid="upload-list">
+      <div class="uploads-head">
+        <h2>Uploads</h2>
+        @if (lastAccepted()) {
+          <a mat-button color="primary" routerLink="/queue" data-testid="view-queue">
+            View in Invoice Queue <mat-icon iconPositionEnd>arrow_forward</mat-icon>
+          </a>
+        }
+        <span class="spacer"></span>
+        <button mat-button type="button" (click)="clear()">Clear finished</button>
+      </div>
+      @for (item of items(); track item.key) {
+        <div class="row" [class.error]="item.state === 'error'" data-testid="upload-row">
+          <mat-icon class="state">
+            @switch (item.state) {
+              @case ('queued') { check_circle }
+              @case ('error') { error }
+              @default { upload_file }
+            }
+          </mat-icon>
+          <div class="info">
+            <div class="name">{{ item.name }} <span class="muted small">{{ size(item.size) }}</span></div>
+            @if (item.state === 'uploading' || item.state === 'pending') {
+              <mat-progress-bar [mode]="item.state === 'pending' ? 'buffer' : 'determinate'" [value]="item.progress" />
+            } @else if (item.state === 'error') {
+              <div class="err" data-testid="upload-error">{{ item.error }}</div>
+            }
+          </div>
+          <div class="status" data-testid="upload-status">
+            @switch (item.state) {
+              @case ('queued') { Queued }
+              @case ('error') { Not uploaded }
+              @case ('uploading') { {{ item.progress }}% }
+              @default { Waiting }
+            }
+          </div>
+        </div>
+      }
+    </section>
+  }
+</div>

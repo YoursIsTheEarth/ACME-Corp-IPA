@@ -1,0 +1,38 @@
+# Optional (F33): `docker compose up` runs the backend and the Angular dev server.
+# Open http://localhost:4200. Settings come from .env when present; LLM_PROVIDER defaults to offline here.
+services:
+  backend:
+    image: python:3.14-slim
+    working_dir: /app
+    volumes:
+      - .:/app
+      - backend-data:/data
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      LLM_PROVIDER: ${LLM_PROVIDER:-offline}
+      DB_PATH: /data/acme.db
+      UPLOAD_DIR: /data/uploads
+    command: >
+      sh -c "pip install --quiet --root-user-action=ignore -e backend &&
+             python -m acme.db seed &&
+             uvicorn acme.api.app:create_app --factory --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+
+  frontend:
+    image: node:22-slim
+    working_dir: /app/frontend
+    volumes:
+      - ./frontend:/app/frontend
+      - frontend-node-modules:/app/frontend/node_modules
+    command: sh -c "npm ci && npx ng serve --host 0.0.0.0 --proxy-config proxy.docker.json"
+    ports:
+      - "4200:4200"
+    depends_on:
+      - backend
+
+volumes:
+  backend-data:
+  frontend-node-modules:
