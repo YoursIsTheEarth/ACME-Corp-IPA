@@ -43,7 +43,7 @@ The Payment Queue SHALL show a header with queued count and total, the payment m
 - **THEN** the header shows 3 queued and $14,690.00
 
 #### Scenario: Delayed mode header
-- **WHEN** payment delay and end of day are on with the defaults
+- **WHEN** payment delay is on and end of day is turned on with the default time and timezone
 - **THEN** the header shows the next batch as "Today 5:00 PM CT" (or tomorrow's) and pay when queue empty as on, with a link to Admin
 
 #### Scenario: Immediate mode header
@@ -95,18 +95,18 @@ The Admin page SHALL show a payment timing form loaded from the backend: a Delay
 
 #### Scenario: Defaults shown
 - **WHEN** a user opens Admin on a new database
-- **THEN** Delay payments is off and the page explains that approved invoices are paid as soon as they are approved
+- **THEN** Delay payments is on, Pay at end of day is off, Pay when the Invoice Queue is empty is on, and the page explains that approved invoices wait in the Payment Queue and are paid when the Invoice Queue is empty
 
 #### Scenario: Last saved by
 - **WHEN** "Dana" saved the settings earlier
 - **THEN** the page shows they were last saved by Dana with the time
 
 ### Requirement: Delay toggle reveals batch options
-The end-of-day and queue-empty options SHALL be shown and editable only while Delay payments is on. Turning Delay payments on for the first time SHALL show Pay at end of day on at 5:00 PM Central Time (America/Chicago) and Pay when the Invoice Queue is empty on. The time and timezone fields SHALL be enabled only while Pay at end of day is on.
+The end-of-day and queue-empty options SHALL be shown and editable only while Delay payments is on. The defaults SHALL be Delay payments on, Pay at end of day off, and Pay when the Invoice Queue is empty on. The time and timezone fields SHALL default to 5:00 PM Central Time (America/Chicago) and SHALL be enabled only while Pay at end of day is on.
 
-#### Scenario: Turning delay on
-- **WHEN** a user turns Delay payments on from the defaults
-- **THEN** Pay at end of day appears on with 5:00 PM and Central Time (America/Chicago), and Pay when the Invoice Queue is empty appears on
+#### Scenario: Turning end of day on
+- **WHEN** a user turns Pay at end of day on from the defaults
+- **THEN** the time and timezone fields become editable showing 5:00 PM and Central Time (America/Chicago)
 
 #### Scenario: End of day off
 - **WHEN** Pay at end of day is turned off

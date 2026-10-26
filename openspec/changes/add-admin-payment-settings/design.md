@@ -17,6 +17,7 @@ See proposal.md for why. Today:
 
 **Goals:**
 - One source of truth for payment timing that operators edit at runtime, from the web app or the CLI.
+- Defaults that match today's golden behavior: delay on, end of day off, pay when the Invoice Queue is empty on.
 - Immediate payment reuses the existing executor, lock, re-checks, idempotency, retries, and revision rules. There is no second payment path.
 
 **Non-Goals:**
@@ -28,7 +29,7 @@ See proposal.md for why. Today:
 
 **D1. `admin_settings` key/value table, with defaults in code.**
 - **What.** The table has columns `key` PK, `value` (JSON text), `updated_by`, and `updated_at`. A new `acme.admin` module exposes:
-  - `PaymentTiming` (Pydantic: `delay_payments=False`, `pay_at_end_of_day=True`, `end_of_day_time=17:00`, `end_of_day_timezone="America/Chicago"`, `pay_when_queue_empty=True`)
+  - `PaymentTiming` (Pydantic: `delay_payments=True`, `pay_at_end_of_day=False`, `end_of_day_time=17:00`, `end_of_day_timezone="America/Chicago"`, `pay_when_queue_empty=True`)
   - `load_payment_timing(conn=None)`, which merges stored keys over the defaults
   - `save_payment_timing(timing, updated_by, conn=None)`, which validates, writes all keys in one transaction, writes an `audit_log` row (`agent="admin"`, `event="settings.updated"`, payload `{by, changes: {key: [old, new]}}`), and emits `settings.updated` on `acme.payments.events`
 - **Why key/value.** It lets later admin settings be added without a migration. A single JSON row was considered; key/value gives per-key `updated_at` for free and keeps `CREATE TABLE IF NOT EXISTS` idempotent on old databases.
@@ -68,21 +69,22 @@ See proposal.md for why. Today:
 - **Route.** `admin` loads a standalone `AdminPage` with a reactive form.
 - **Sidebar.** `shell.component` renders Admin in a separate `mat-nav-list` after a spacer and divider, above the provider footer, with icon `admin_panel_settings`.
 - **Timezone picker.** It uses `Intl.supportedValuesOf('timeZone')` with a filterable autocomplete, with America/Chicago, America/New_York, America/Denver, America/Los_Angeles, and UTC listed first.
-- **Defaults on first enable.** When `delay_payments` is first switched on, the form shows the spec defaults if they were never saved. The backend already returns defaults for unsaved keys.
+- **Defaults.** On a new database the form loads with delay on, pay at end of day off, and pay when the queue is empty on. The end-of-day time and timezone fields show 5:00 PM and America/Chicago when end of day is turned on. The backend already returns defaults for unsaved keys.
 - **Save.** Save opens a confirm dialog listing changed fields, with the shared name field.
 - **Payment Queue header.** It renders the mode text and a `routerLink` to `/admin`.
 
 **D7. Golden suite runs in two configurations.**
 - **Fixture.** `golden_run(timing)` in `tests/conftest.py`, applied with `save_payment_timing` before processing.
-- **Existing table.** It runs with `delay_payments=True, pay_at_end_of_day=False, pay_when_queue_empty=True`. There is no scheduler in tests, so idle never fires, and the explicit batch reproduces today's results.
-- **New variant.** It runs with the defaults and asserts 7 Paid, 1 Revised, 0 Superseded, 1 held, 11 rejected (3 duplicates), and 8 `immediate` batches. The amounts are INV-1004 $1,890.00 and the R1 delta $4,050.00 ($5,940.00 − $1,890.00), with the total still $37,620.00.
-- **Other payment tests.** Existing payment, revision, idle and end-of-day tests set `delay_payments=True` explicitly so their meaning is unchanged.
+- **Existing table.** It runs with the defaults (`delay_payments=True, pay_at_end_of_day=False, pay_when_queue_empty=True`). There is no scheduler in tests, so idle never fires, and the explicit batch reproduces today's results.
+- **New variant.** It runs with `delay_payments=False` set explicitly and asserts 7 Paid, 1 Revised, 0 Superseded, 1 held, 11 rejected (3 duplicates), and 8 `immediate` batches. The amounts are INV-1004 $1,890.00 and the R1 delta $4,050.00 ($5,940.00 − $1,890.00), with the total still $37,620.00.
+- **Other payment tests.** Existing payment, revision and idle tests keep their meaning under the defaults. End-of-day tests set `pay_at_end_of_day=True` explicitly, and immediate-mode tests set `delay_payments=False` explicitly.
 
 **D8. CLI.** `admin show` and `admin set` are thin wrappers over `load_payment_timing` and `save_payment_timing`. They're cheap because validation lives in `acme.admin`. Single-file output gains the payment ID when it was paid at approval.
 
 ## Risks / Trade-offs
 
-- [The default flips to paying at approval, so a revision can no longer replace an unpaid original in the common case] → Paid-original rules (delta, credit hold, Revised) are already implemented and tested. The Payment Queue header and the Admin page explain the mode, and the delayed golden table keeps the replacement path tested.
+- [The default no longer runs a 5:00 PM end-of-day batch, so a queue that never empties waits for a person or the idle trigger] → The Payment Queue header shows the mode and that no end-of-day batch is scheduled, with a link to Admin; turning end of day on restores the daily batch.
+- [In immediate mode a revision can no longer replace an unpaid original in the common case] → Paid-original rules (delta, credit hold, Revised) are already implemented and tested, and the immediate golden variant covers them.
 - [Synchronous immediate batches add `mock_payment` latency to every approval] → `mock_payment` is local and fast. In the API the pipeline already runs on the worker thread, not the request.
 - [Rebuilding the `payment_batches` table on old databases] → It runs in one transaction, only when the old CHECK is detected, and is covered by a migration test using a database created with the old schema.
 - [No authentication on Admin] → It is attributed by typed name and audited, consistent with reviews. Real access control is a stated non-goal.
@@ -91,5 +93,5 @@ See proposal.md for why. Today:
 ## Migration Plan
 
 1. Deploy: `init_schema` adds `admin_settings` and rebuilds `payment_batches` if needed.
-2. The default is delay off. Anyone who set `PAYMENT_BATCH_TIME`, `PAYMENT_TZ`, or `PAYMENT_AUTO_IDLE` in `.env` must re-enter them on the Admin page or with `admin set`. Those keys are now ignored and removed from `.env.example`.
+2. The defaults are delay on, end of day off, pay when queue empty on. The daily 5:00 PM batch that ran before is therefore off until an operator turns on Pay at end of day. Anyone who set `PAYMENT_BATCH_TIME`, `PAYMENT_TZ`, or `PAYMENT_AUTO_IDLE` in `.env` must re-enter them on the Admin page or with `admin set`. Those keys are now ignored and removed from `.env.example`.
 3. Rollback: revert the code. The extra table is harmless to the old code, and `immediate` batch rows would violate the old CHECK only if the table were rebuilt again, which the old code never does.

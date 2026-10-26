@@ -46,11 +46,11 @@ Batches started by `end_of_day`, `idle`, or `pay_all` SHALL attempt every payabl
 The system SHALL expose a decision that an end-of-day batch is due once per day at the admin end-of-day time (default 17:00) in the admin timezone (default America/Chicago), only when payment delay is on and pay at end of day is on. It SHALL also report the next scheduled batch time for display, or none when no end-of-day batch is scheduled.
 
 #### Scenario: Next batch time
-- **WHEN** delay and end of day are on with the defaults and the next batch time is requested at 2:00 PM Central
+- **WHEN** delay is on and end of day is turned on with the default time and timezone, and the next batch time is requested at 2:00 PM Central
 - **THEN** it reports today at 5:00 PM Central
 
 #### Scenario: After the batch time
-- **WHEN** delay and end of day are on with the defaults and it is requested at 6:00 PM Central
+- **WHEN** delay is on and end of day is turned on with the default time and timezone, and it is requested at 6:00 PM Central
 - **THEN** it reports tomorrow at 5:00 PM Central
 
 #### Scenario: Custom time and timezone
@@ -83,15 +83,16 @@ An idle batch SHALL be due only when payment delay is on, pay when the Invoice Q
 ## ADDED Requirements
 
 ### Requirement: Payment timing settings
-The system SHALL read payment timing from stored admin settings: delay payments (default off), pay at end of day (default on), end-of-day time (default 17:00), end-of-day timezone (default America/Chicago), and pay when the Invoice Queue is empty (default on). Defaults SHALL apply to any value never saved. A saved change SHALL take effect for the next decision without a restart.
+The system SHALL read payment timing from stored admin settings: delay payments (default on), pay at end of day (default off), end-of-day time (default 17:00), end-of-day timezone (default America/Chicago), and pay when the Invoice Queue is empty (default on). Defaults SHALL apply to any value never saved. A saved change SHALL take effect for the next decision without a restart.
 
 #### Scenario: Defaults on a new database
 - **WHEN** payment timing is read from a freshly seeded `acme.db`
-- **THEN** delay is off, end of day is on at 17:00 America/Chicago, and pay when queue empty is on
+- **THEN** delay is on, end of day is off (with 17:00 America/Chicago stored as the time and timezone used when it is turned on), and pay when queue empty is on
+- **AND** no end-of-day batch is due at any time of day
 
 #### Scenario: Change applies without restart
-- **WHEN** delay is turned on while the system is running and an invoice is approved afterward
-- **THEN** that invoice's row stays `queued` and no `immediate` batch runs
+- **WHEN** delay is turned off while the system is running and an invoice is approved afterward
+- **THEN** that invoice is paid by an `immediate` batch without a restart
 
 ### Requirement: Immediate payment waits for a running batch
 When payment delay is off and an approved row cannot be paid because another batch is running, the row SHALL stay `queued` and SHALL be paid by an `immediate` batch started as soon as the running batch finishes. No approved row SHALL be left unpaid while delay is off and the queue is otherwise idle.

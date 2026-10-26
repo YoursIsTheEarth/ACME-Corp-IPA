@@ -46,9 +46,9 @@ CLI processing SHALL follow the stored payment timing. With delay off, each appr
 ### Requirement: Show and change payment timing from the terminal
 `python main.py admin show` SHALL print the current payment timing and who last saved it. `python main.py admin set` SHALL accept `--delay-payments`, `--pay-at-end-of-day`, `--end-of-day-time HH:MM`, `--end-of-day-timezone <IANA>`, `--pay-when-queue-empty` (each with `on` or `off` where boolean) and a required `--by <name>` (1–50 characters). It SHALL validate like the API, save, audit the change, and exit non-zero with a message on invalid input. Neither command needs an LLM key.
 
-#### Scenario: Turn on delayed payments
-- **WHEN** a user runs `python main.py admin set --delay-payments on --by Dana`
-- **THEN** the settings are saved with delay on and the other values unchanged, and `admin show` prints delay on, last saved by Dana
+#### Scenario: Turn on immediate payments
+- **WHEN** a user runs `python main.py admin set --delay-payments off --by Dana`
+- **THEN** the settings are saved with delay off and the other values unchanged, and `admin show` prints delay off, last saved by Dana
 
 #### Scenario: Invalid timezone
 - **WHEN** a user runs `python main.py admin set --end-of-day-timezone Mars/Olympus --by Dana`

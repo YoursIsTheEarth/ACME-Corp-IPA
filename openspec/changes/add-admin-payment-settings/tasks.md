@@ -15,16 +15,16 @@ Apply after `reorder-sidebar-menu` and `require-llm-provider` (see design.md, Co
 
 ## 2. Payment timing in the payments module
 
-- [ ] 2.1 Change `acme/payments/triggers.py` so that `next_batch_time`, `end_of_day_due`, and `idle_batch_due` take a `PaymentTiming`: no end-of-day batch unless delay and end of day are on, and no idle batch unless delay and pay-when-queue-empty are on. Verify that `tests/payments/test_triggers.py` covers the defaults, a custom time and timezone (08:30 America/New_York), delay off, and each toggle off.
+- [ ] 2.1 Change `acme/payments/triggers.py` so that `next_batch_time`, `end_of_day_due`, and `idle_batch_due` take a `PaymentTiming`: no end-of-day batch unless delay and end of day are on, and no idle batch unless delay and pay-when-queue-empty are on. Verify that `tests/payments/test_triggers.py` covers the defaults (no end-of-day batch scheduled, idle on), end of day turned on at the default 17:00 America/Chicago, a custom time and timezone (08:30 America/New_York), delay off, and each toggle off.
 - [ ] 2.2 Add the `immediate` trigger to `run_batch`, with released_by `System` and the scope of every `queued` row plus `failed` rows whose last attempt is at least `PAYMENT_IDLE_DELAY_S` old. Verify that `tests/payments/test_executor.py` covers the batch record, the scope (a just-failed row skipped and retried after the wait), and the third failure escalating to Elevated Review.
 - [ ] 2.3 Add `payments.pay_now_if_immediate(conn=None)`, which runs an `immediate` batch when delay is off and returns `None` on `BatchAlreadyRunning`. Also add a post-batch drain hook in `run_batch` that starts another `immediate` batch when delay is off and rows are payable. Verify with a test where a row is queued while a Pay all batch runs and is paid by an `immediate` batch right after it, with no concurrent batch.
 - [ ] 2.4 Call `pay_now_if_immediate` from disposition (`backend/src/acme/graph/nodes.py`) after `queue_payment` returns `queued`, and from `save_payment_timing` when delay changes true → false. Verify with workflow tests: delay off pays INV-1001 at approval (final status Paid, trigger `immediate`); delay on leaves it `queued`; switching to off with 3 rows queued pays all 3 in one batch; switching to on pays nothing.
-- [ ] 2.5 Set `delay_payments=True` in the shared payment and revision test fixtures (`tests/payments/conftest.py`, `tests/workflow` helpers), so existing tests keep their meaning. Add the immediate-mode revision test: INV-1004 is paid $1,890.00, then R1 pays a $4,050.00 delta and is Revised. Verify that `pytest backend/tests/payments backend/tests/workflow` passes.
+- [ ] 2.5 Confirm the shared payment and revision test fixtures (`tests/payments/conftest.py`, `tests/workflow` helpers) run with the defaults (delay on), so existing tests keep their meaning; set `pay_at_end_of_day=True` explicitly in end-of-day tests and `delay_payments=False` explicitly in immediate-mode tests. Add the immediate-mode revision test: INV-1004 is paid $1,890.00, then R1 pays a $4,050.00 delta and is Revised. Verify that `pytest backend/tests/payments backend/tests/workflow` passes.
 
 ## 3. Golden suite in two configurations
 
-- [ ] 3.1 Add a `golden_run(timing)` fixture and run the existing table with `delay_payments=True, pay_at_end_of_day=False, pay_when_queue_empty=True`. Verify that `pytest backend/tests/test_golden.py` passes unchanged.
-- [ ] 3.2 Add the immediate golden variant with default timing. Assert:
+- [ ] 3.1 Add a `golden_run(timing)` fixture and run the existing table with the default timing (`delay_payments=True, pay_at_end_of_day=False, pay_when_queue_empty=True`). Verify that `pytest backend/tests/test_golden.py` passes unchanged.
+- [ ] 3.2 Add the immediate golden variant with `delay_payments=False` set explicitly. Assert:
   - INV-1004 is PAID $1,890.00 with no `SUPERSEDED_BY_REVISION`
   - R1 is Revised with `REVISION` and a $4,050.00 delta
   - counts are 7 paid, 1 revised, 0 superseded, 1 held, 11 rejected (3 duplicates)
@@ -48,8 +48,8 @@ Apply after `reorder-sidebar-menu` and `require-llm-provider` (see design.md, Co
 ## 5. CLI
 
 - [ ] 5.1 Make single-file and `--batch` output show "Paid" and the payment ID when an invoice was paid at approval, and "Queued for payment" otherwise. Make `--pay` and `payments run` print "nothing queued" when nothing is payable. Verify that `tests/test_cli.py` covers both modes.
-- [ ] 5.2 Add `python main.py admin show` and `admin set` (`--delay-payments on|off`, `--pay-at-end-of-day on|off`, `--end-of-day-time HH:MM`, `--end-of-day-timezone`, `--pay-when-queue-empty on|off`, `--by NAME` required), using `acme.admin` validation, with no LLM key needed. Verify with CLI tests: turn delay on, show it, and an invalid timezone exits non-zero with nothing saved.
-- [ ] 5.3 Make the batch summary report Revised separately from Paid. Verify that the delay-off golden summary shows 7 paid, 1 revised, 0 superseded and $37,620.00 paid, and the delay-on summary is unchanged. Update the README's CLI usage section with `admin show` / `admin set` and verify that the commands run as written.
+- [ ] 5.2 Add `python main.py admin show` and `admin set` (`--delay-payments on|off`, `--pay-at-end-of-day on|off`, `--end-of-day-time HH:MM`, `--end-of-day-timezone`, `--pay-when-queue-empty on|off`, `--by NAME` required), using `acme.admin` validation, with no LLM key needed. Verify with CLI tests: `admin show` prints the defaults (delay on, end of day off, queue-empty on), turn delay off and show it, and an invalid timezone exits non-zero with nothing saved.
+- [ ] 5.3 Make the batch summary report Revised separately from Paid. Verify that the delay-off (immediate) golden summary shows 7 paid, 1 revised, 0 superseded and $37,620.00 paid, and the default (delay-on) summary is unchanged. Update the README's CLI usage section with `admin show` / `admin set` and verify that the commands run as written.
 
 ## 6. Web app
 
@@ -57,7 +57,7 @@ Apply after `reorder-sidebar-menu` and `require-llm-provider` (see design.md, Co
 - [ ] 6.2 Add `AdminSettings` to `core/api.models.ts`, `getAdminSettings` / `saveAdminSettings` to `core/api-client.ts`, and `settings.updated` handling in the live store. Verify with `api-client.spec.ts` and `live-store.spec.ts`.
 - [ ] 6.3 Create `pages/admin.page.ts`:
   - **Form.** A reactive form with the delay toggle revealing the end-of-day toggle, time, timezone autocomplete (common US zones and UTC first), and the queue-empty toggle. Time and timezone are enabled only while end of day is on.
-  - **Defaults and copy.** Defaults appear when delay is first turned on, with a mode sentence, last saved by and when, and a warning when turning delay off will pay the queue.
+  - **Defaults and copy.** On a new database the form shows delay on, end of day off, and queue-empty on; time 5:00 PM and timezone America/Chicago fill in when end of day is turned on. It shows a mode sentence, last saved by and when, and a warning when turning delay off will pay the queue.
   - **Saving.** Save is enabled only when the form is changed and valid. It opens a confirm dialog with a change summary and the shared name field. A success toast confirms the save; a 422 is shown on its field; a `settings.updated` event from elsewhere refreshes an unchanged form or warns on unsaved edits.
 
   Verify with `admin.page.spec.ts`, covering each scenario in the web-app delta.
@@ -67,7 +67,7 @@ Apply after `reorder-sidebar-menu` and `require-llm-provider` (see design.md, Co
   - in both modes, a link to Admin; Pay all / Pay selected / Pay now stay available
 
   Update its model fields (`auto_idle` becomes `pay_when_queue_empty`). Verify with component tests for both modes.
-- [ ] 6.5 Update `frontend/e2e/happy-path.spec.ts` to set delay on through the Admin page before uploading, so the existing upload → review → Pay all flow is unchanged. Add an e2e step that turns delay off on Admin, uploads `invoice_1006.csv`, and sees it in Payments with batch trigger `immediate` without clicking Pay. Verify that `make e2e` passes.
+- [ ] 6.5 Confirm `frontend/e2e/happy-path.spec.ts` runs unchanged under the defaults (delay on, end of day off), so the existing upload → review → Pay all flow is unchanged. Add an e2e step that turns delay off on Admin, uploads `invoice_1006.csv`, and sees it in Payments with batch trigger `immediate` without clicking Pay. Verify that `make e2e` passes.
 - [ ] 6.6 List the `Revised` final status on the Invoice Resolution Audit page: offer it in the status filter and give it its own chip style, and confirm `GET /api/invoices?view=audit&status=Revised` returns revised runs. Verify with a component test for the filter option and an API test for the status filter.
 - [ ] 6.7 Verify that `npm --prefix frontend run build` and `npm --prefix frontend run test:ci` pass with no warnings.
 
@@ -76,9 +76,9 @@ Apply after `reorder-sidebar-menu` and `require-llm-provider` (see design.md, Co
 - [ ] 7.1 Update the root README's web app section with the Admin page, payment modes, and the removed `.env` keys, and verify that the steps match the running app.
 - [ ] 7.2 Integration check:
   - from a clean checkout with an LLM key set, run `make setup`, then `./run.sh`
-  - upload `invoice_1001.txt` and confirm it is paid at approval
-  - on Admin, turn delay on as "Dana", upload `invoice_1006.csv`, and confirm it waits in the Payment Queue with the next batch at 5:00 PM CT
-  - turn delay off and confirm it is paid by an `immediate` batch
+  - upload `invoice_1001.txt` and confirm it waits in the Payment Queue with no end-of-day batch scheduled (defaults)
+  - on Admin, as "Dana", turn Pay at end of day on and confirm the next batch shows 5:00 PM CT
+  - turn delay off and confirm the queued invoice is paid by an `immediate` batch; upload `invoice_1006.csv` and confirm it is paid at approval
   - verify `pytest backend/tests` passes
 
 ## Workflow follow-up

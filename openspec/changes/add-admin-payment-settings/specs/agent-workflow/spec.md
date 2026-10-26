@@ -1,10 +1,10 @@
 ## MODIFIED Requirements
 
 ### Requirement: Golden outcomes for the provided files
-Processing all 20 files in `data/invoices/` in sorted filename order with the test-only fake model standing in for the LLM provider and payment delay on (pay at end of day off, pay when the Invoice Queue is empty on), followed by one payment batch, SHALL produce the outcome, paid amount, and key finding codes listed for each file in the Full golden batch scenario (F20).
+Processing all 20 files in `data/invoices/` in sorted filename order with the test-only fake model standing in for the LLM provider and the default payment timing (delay on, pay at end of day off, pay when the Invoice Queue is empty on), followed by one payment batch, SHALL produce the outcome, paid amount, and key finding codes listed for each file in the Full golden batch scenario (F20).
 
 #### Scenario: Full golden batch
-- **WHEN** all 20 files are processed in sorted filename order with the test-only fake model and payment delay on, and one payment batch runs
+- **WHEN** all 20 files are processed in sorted filename order with the test-only fake model and the default payment timing, and one payment batch runs
 - **THEN** each file's outcome and key finding codes match the table below, the paid amounts match, and the counts are 7 paid, 1 superseded, 1 held, 11 rejected (3 as duplicates)
 
 | File | Outcome | Paid in batch | Key finding codes |
@@ -37,7 +37,7 @@ Processing all 20 files in `data/invoices/` in sorted filename order with the te
 ## ADDED Requirements
 
 ### Requirement: Golden outcomes with immediate payments
-Processing all 20 files in sorted filename order with the test-only fake model and the default payment timing (delay off) SHALL pay each approved invoice as it is approved, with every file's outcome, finding codes, and paid amount as in the delayed golden table except for the INV-1004 pair.
+Processing all 20 files in sorted filename order with the test-only fake model and payment delay explicitly turned off (immediate mode, not the default) SHALL pay each approved invoice as it is approved, with every file's outcome, finding codes, and paid amount as in the delayed golden table except for the INV-1004 pair.
 
 #### Scenario: Full golden run with delay off
 - **WHEN** all 20 files are processed in sorted filename order with payment delay off and no manual batch runs

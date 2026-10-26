@@ -4,7 +4,7 @@
 `GET /api/payment-queue` SHALL return the rows with status `queued`, `paying`, or `failed`. Each row SHALL include invoice number, vendor, amount in USD, kind (full, replacement, delta), approver, queued time, status, attempts, and last error. The response SHALL also give the queued count and total and the payment mode: whether payment delay is on, the next scheduled end-of-day batch time with its timezone (null when none is scheduled), and whether pay when the Invoice Queue is empty is on.
 
 #### Scenario: Queue after a batch upload
-- **WHEN** payment delay and end of day are on with the defaults, `invoice_1001.txt` and `invoice_1006.csv` have been approved, and no batch has run
+- **WHEN** payment delay is on and end of day is turned on with the default time and timezone, `invoice_1001.txt` and `invoice_1006.csv` have been approved, and no batch has run
 - **THEN** the payment queue shows 2 rows of kind full, a queued total of $7,750.00, delay on, and the next end-of-day batch time in America/Chicago
 
 #### Scenario: Immediate mode
@@ -95,13 +95,13 @@ The service SHALL take its schedule from the admin settings. With delay on and p
 
 #### Scenario: Defaults
 - **WHEN** no admin settings were ever saved
-- **THEN** the response is `delay_payments` false, `pay_at_end_of_day` true, `end_of_day_time` "17:00", `end_of_day_timezone` "America/Chicago", `pay_when_queue_empty` true, and `updated_by` null
+- **THEN** the response is `delay_payments` true, `pay_at_end_of_day` false, `end_of_day_time` "17:00", `end_of_day_timezone` "America/Chicago", `pay_when_queue_empty` true, and `updated_by` null
 
 ### Requirement: Update admin settings
 `PUT /api/admin/settings` SHALL take all five settings and a required `updated_by`, save them, apply them without a restart, and return the saved settings. It SHALL return 422, saving nothing, when `updated_by` after trimming is empty or longer than 50 characters, `end_of_day_time` is not a valid `HH:MM` time, or `end_of_day_timezone` is not a known IANA timezone.
 
-#### Scenario: Turn on delayed payments
-- **WHEN** a client puts `delay_payments` true with the other defaults and `updated_by` "Dana"
+#### Scenario: Turn on end-of-day payments
+- **WHEN** a client puts `pay_at_end_of_day` true with the other defaults and `updated_by` "Dana"
 - **THEN** the response is 200 with the saved settings and `updated_by` "Dana", and a later GET returns the same values
 
 #### Scenario: Unknown timezone
