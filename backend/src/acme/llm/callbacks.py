@@ -1,7 +1,7 @@
 """LangChain callback that records every chat-model call in `llm_calls`.
 
 Pass the prompt version as invocation metadata:
-    model.invoke(messages, config={"metadata": {"prompt_version": "extraction.v2"}})
+    model.invoke(messages, config={"metadata": {"prompt_version": "extraction.v3"}})
 """
 
 import logging

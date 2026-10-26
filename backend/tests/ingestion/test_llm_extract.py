@@ -60,7 +60,7 @@ def test_fake_model_extraction(db, name, fmt, number, vendor, lines, subtotal, t
     assert money(inv.subtotal) == (Decimal(subtotal) if subtotal else None)
     assert money(inv.total) == Decimal(total)
     [call] = db.execute("SELECT agent, provider, prompt_version FROM llm_calls").fetchall()
-    assert tuple(call) == ("ingestion", "fake", "extraction.v2")
+    assert tuple(call) == ("ingestion", "fake", "extraction.v3")
 
 
 def test_1010_tax_shipping_and_dates(db):

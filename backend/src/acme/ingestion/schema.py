@@ -39,6 +39,12 @@ class ExtractedInvoice(Invoice):
     shipping: Money | None = None
     total: Money
 
+    @field_validator("original_total", "extraction_confidence", mode="before")
+    @classmethod
+    def _blank_means_not_stated(cls, value):
+        """LLMs return "" for fields they have no value for (original_total on a USD invoice)."""
+        return None if isinstance(value, str) and not value.strip() else value
+
 
 class IngestionResult(BaseModel):
     """What `ingest()` returns: `extracted` is None exactly when ingestion failed closed."""

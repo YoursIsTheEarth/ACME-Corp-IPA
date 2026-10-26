@@ -50,3 +50,9 @@ def test_quantity_with_bad_commas_is_still_a_schema_error(raw):
 def test_ingestion_result_retries():
     assert IngestionResult(attempts=2).retries == 1
     assert IngestionResult().retries == 0
+
+
+def test_blank_optional_fields_from_the_model_mean_not_stated():
+    # Live Grok returns "" for fields it has no value for (original_total on a USD invoice)
+    inv = ExtractedInvoice(invoice_number="INV-1001", total="$5,000.00", original_total="", extraction_confidence=" ")
+    assert inv.original_total is None and inv.extraction_confidence is None
