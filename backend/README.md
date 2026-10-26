@@ -30,7 +30,7 @@ config change only.
 | `CLAUDE_MODEL` | `claude-sonnet-5-5` | Needs `ANTHROPIC_API_KEY`. `claude-opus-5-5` for the hardest reasoning |
 | `LLM_PROVIDER_EXTRACTION`, `_VALIDATION`, `_APPROVAL`, `_CRITIC` | unset | Per-role override, e.g. `LLM_PROVIDER_CRITIC=claude` for cross-model critique |
 | `LLM_TEMPERATURE` | `0` | |
-| `LLM_TIMEOUT_S` / `LLM_MAX_RETRIES` | `30` / `3` | Exponential backoff on 429 and 5xx |
+| `LLM_TIMEOUT_S` / `LLM_MAX_RETRIES` | `30` / `3` | Exponential backoff on 429, 5xx, timeouts, and connection failures (not on 4xx such as a proxy 403) |
 
 **Key status.** `acme.llm.key_status()` reports whether every provider in use (per-role overrides
 included) has its key, and names the first missing variable. `python -m acme.llm` prints it.
@@ -49,13 +49,19 @@ Every call is recorded in the `llm_calls` table (provider, model, prompt version
 latency, retries, failure), including the Validation stage's address plausibility call
 (prompt `address_v1`).
 
+## Math checks: rounding goes to review
+
+| Setting | Default | Notes |
+| --- | --- | --- |
+| `MATH_ROUNDING_TOLERANCE_USD` | `1.00` | A line, subtotal, or total off by $0.01 up to this amount raises WARNING `MATH_ROUNDING` (held for review); more raises CRITICAL `MATH_MISMATCH` (rejected). `0` rejects any cent. Ingestion's line-sum self-correction accepts the same tolerance |
+
 ## Fraud checks: payee threshold and prompt injection
 
 | Setting | Default | Notes |
 | --- | --- | --- |
 | `PAYEE_WINDOW_DAYS` | `30` | Rolling window for the cumulative payee total |
 | `PAYEE_CUMULATIVE_THRESHOLD_USD` | `10000.00` | A payee total over this (at least two invoices) raises `PAYEE_CUMULATIVE_THRESHOLD` |
-| `FRAUD_SIGNAL_WEIGHTS` | includes `payee_cumulative: 0.25`, `prompt_injection: 0.60` | `prompt_injection` alone reaches `FRAUD_THRESHOLD` (0.60) |
+| `FRAUD_SIGNAL_WEIGHTS` | includes `payee_cumulative: 0.25`, `prompt_injection: 0.60` | `prompt_injection` alone reaches `FRAUD_THRESHOLD` (0.60). A value you set is merged over the defaults: signals it leaves out keep their default weight, and 0 turns one off |
 
 **Payee registry.** `acme.payees` keeps one identity per payee (`payees`, `payee_names`, `payee_addresses`)
 and a ledger of every invoice received for it (`payee_invoices`, rejected and duplicate copies included,

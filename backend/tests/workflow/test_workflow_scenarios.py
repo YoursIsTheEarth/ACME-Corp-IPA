@@ -81,6 +81,16 @@ def test_total_off_by_one_cent(wdb, tmp_path):
     data["total"] = 1890.01
     path.write_text(json.dumps(data))
     result = run_invoice(path)
+    assert result.outcome == "NEEDS_REVIEW" and "MATH_ROUNDING" in codes(result)
+    assert "MATH_MISMATCH" not in codes(result)
+
+
+def test_total_off_by_more_than_the_rounding_tolerance(wdb, tmp_path):
+    path = inv_1004(tmp_path, "dollar.json")
+    data = json.loads(path.read_text())
+    data["total"] = 1891.01
+    path.write_text(json.dumps(data))
+    result = run_invoice(path)
     assert result.outcome == "REJECT" and "MATH_MISMATCH" in codes(result)
 
 

@@ -153,6 +153,13 @@ def test_line_sum_mismatch_triggers_retry(db, stub_model, text_file):
     assert "difference 1500.00" in prompts[1]
 
 
+def test_rounding_difference_in_line_sum_is_accepted(db, stub_model, text_file):
+    rounded = {**VALID, "subtotal": "$6,699.98"}  # lines sum to 6700.00
+    stub_model(rounded)
+    result = ingest(text_file)
+    assert result.extracted is not None and result.retries == 0
+
+
 def test_line_sum_message_states_the_difference(db, stub_model, text_file):
     six_two = {**VALID, "line_items": [*VALID["line_items"][:3],
                                        {**VALID["line_items"][3], "amount": "$700.00", "unit_price": "$175.00"}]}

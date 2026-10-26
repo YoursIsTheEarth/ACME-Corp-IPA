@@ -23,6 +23,7 @@ def test_catalog_defaults(monkeypatch):
     assert s.fx_rates == {"EUR": Decimal("1.08")}
     assert s.price_variance_pct == Decimal("10")
     assert s.near_threshold_floor_usd == Decimal("9500.00")
+    assert s.math_rounding_tolerance_usd == Decimal("1.00")
     assert s.fraud_signal_weights["suspicious_address"] == 0.30
     assert (s.fraud_signal_weights["payee_cumulative"], s.fraud_signal_weights["prompt_injection"]) == (0.25, 0.60)
     assert sum(s.fraud_signal_weights.values()) == pytest.approx(2.25)
@@ -85,3 +86,17 @@ def test_removed_payment_timing_settings_are_ignored(tmp_path, monkeypatch):
         assert not hasattr(s, name)
     names = {line.split("=", 1)[0] for line in (REPO_ROOT / ".env.example").read_text().splitlines() if "=" in line}
     assert not names & {"PAYMENT_BATCH_TIME", "PAYMENT_TZ", "PAYMENT_AUTO_IDLE"}
+
+
+def test_partial_fraud_weights_keep_the_other_defaults(monkeypatch):
+    # An .env written before payee_cumulative and prompt_injection existed
+    monkeypatch.setenv("FRAUD_SIGNAL_WEIGHTS", '{"urgency_language": 0.25, "unknown_vendor": 0.5}')
+    weights = Settings().fraud_signal_weights
+    assert weights["unknown_vendor"] == 0.5 and weights["prompt_injection"] == 0.60
+    assert weights["payee_cumulative"] == 0.25
+
+
+def test_zero_weight_turns_a_signal_off(monkeypatch):
+    monkeypatch.setenv("FRAUD_SIGNAL_WEIGHTS", '{"near_threshold": 0}')
+    assert Settings().fraud_signal_weights["near_threshold"] == 0
+

@@ -100,7 +100,7 @@ Invoice text sent to the LLM SHALL be enclosed in delimiters and labeled as untr
 - **THEN** the extracted total still matches the invoice's printed total, and the line is kept only as content
 
 ### Requirement: Extraction self-correction (F4)
-After each LLM extraction attempt, the system SHALL check that the result passes the `Invoice` schema and that line-item amounts sum to the subtotal within $0.01, or to the total when no subtotal is printed. On failure it SHALL retry with the exact error text in the prompt, up to 2 retries (3 attempts in total).
+After each LLM extraction attempt, the system SHALL check that the result passes the `Invoice` schema. It SHALL also check that line-item amounts sum to the subtotal, or to the total when no subtotal is printed, within the larger of $0.01 and `MATH_ROUNDING_TOLERANCE_USD`. On failure it SHALL retry with the exact error text in the prompt, up to 2 retries (3 attempts in total).
 
 #### Scenario: Schema error corrected on retry
 - **WHEN** the first attempt returns a quantity as a non-numeric string and the second attempt is valid
@@ -109,6 +109,10 @@ After each LLM extraction attempt, the system SHALL check that the result passes
 #### Scenario: Line sum mismatch triggers retry
 - **WHEN** an attempt's line amounts sum to 6200.00 but its subtotal reads 6700.00
 - **THEN** the next attempt's prompt states the 500.00 difference, and the run's retry count increments
+
+#### Scenario: Rounding difference accepted
+- **WHEN** an attempt's line amounts sum to 6700.02 and its subtotal reads 6700.00, with the default tolerance
+- **THEN** the attempt is accepted without a retry
 
 #### Scenario: Invoice without a subtotal line
 - **WHEN** `invoice_1002.txt` (only "Amt: $15,000.00") is extracted
@@ -151,3 +155,17 @@ Decimal-comma formats (such as "4.125,00") are out of scope.
 - **WHEN** the extraction prompt is rendered
 - **THEN** it instructs the model to drop thousands-separator commas from money and quantities
 - **AND** none of its few-shot outputs contains a thousands separator
+
+### Requirement: Blank and worded fields from the LLM
+LLM extraction SHALL tolerate the ways a live model fills fields:
+- A blank string for `original_total` or `extraction_confidence` SHALL mean not stated.
+- The extraction prompt (`extraction.v3`) SHALL ask for null instead of `""`, and for dates written in words ("yesterday", "upon receipt") to be copied as printed.
+- When the model leaves `due_date` null or blank and sets no `due_date_raw`, a printed `Due Date:` (or `Due:`) value in the document text SHALL be copied as found.
+
+#### Scenario: Blank original total on a USD invoice
+- **WHEN** the model returns `"original_total": ""` for INV-1001
+- **THEN** extraction is accepted on the first attempt with `original_total` empty
+
+#### Scenario: Worded due date left blank by the model
+- **WHEN** the model returns a blank `due_date` for a document that prints "Due Date: yesterday"
+- **THEN** the extracted `due_date` is "yesterday"

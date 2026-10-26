@@ -229,7 +229,7 @@ class _StatusError(Exception):
 
 
 class _FlakyModel(BaseChatModel):
-    statuses: list[int]
+    statuses: list[int | Exception]
     calls: int = 0
 
     @property
@@ -239,7 +239,8 @@ class _FlakyModel(BaseChatModel):
     def _generate(self, messages, stop=None, run_manager=None, **kwargs):
         self.calls += 1
         if self.statuses:
-            raise _StatusError(self.statuses.pop(0))
+            status = self.statuses.pop(0)
+            raise status if isinstance(status, Exception) else _StatusError(status)
         message = AIMessage(content="ok", usage_metadata={"input_tokens": 12, "output_tokens": 3, "total_tokens": 15})
         return ChatResult(generations=[ChatGeneration(message=message)])
 
@@ -292,3 +293,21 @@ def test_real_sdk_errors_classified():
         assert retry.is_retryable(err(sdk.RateLimitError, 429))
         assert retry.is_retryable(err(sdk.InternalServerError, 503))
         assert not retry.is_retryable(err(sdk.BadRequestError, 400))
+        assert not retry.is_retryable(err(sdk.PermissionDeniedError, 403))  # e.g. a sandbox proxy block
+        assert retry.is_retryable(sdk.APITimeoutError(request=request))
+        assert retry.is_retryable(sdk.APIConnectionError(request=request))
+    from langchain_openai.chat_models.base import OpenAITimeoutError
+    assert retry.is_retryable(OpenAITimeoutError(request=request))
+    assert retry.is_retryable(httpx.ReadTimeout("slow", request=request))
+
+
+def test_timeout_then_success(db, sleeps):
+    import httpx
+    import openai
+    timeout = openai.APITimeoutError(request=httpx.Request("POST", "https://example.invalid"))
+    model = _RetryingFlaky(statuses=[timeout], callbacks=[LLMCallRecorder("grok", "grok-4", "approval")])
+    with run_context("r-timeout"):
+        assert model.invoke("hi").content == "ok"
+    assert model.calls == 2 and sleeps == [0.5]
+    row = db.execute("SELECT * FROM llm_calls").fetchone()
+    assert (row["retries"], row["failed"]) == (1, 0)

@@ -87,7 +87,7 @@ Any line item with a quantity of zero or less SHALL yield CRITICAL `INVALID_QUAN
 - **THEN** a CRITICAL `INVALID_QUANTITY` finding cites that line
 
 ### Requirement: Arithmetic reconciliation (F9)
-The system SHALL check, with a tolerance of $0.01, that each line's `quantity × unit_price` equals its `amount`, that the line amounts sum to `subtotal`, and that `subtotal + tax + shipping` equals `total`. When `subtotal` is absent, the line sum SHALL stand in for it, and absent `tax` or `shipping` count as zero. Any mismatch SHALL yield CRITICAL `MATH_MISMATCH`, with the expected and actual values as evidence.
+The system SHALL check that each line's `quantity × unit_price` equals its `amount`, that the line amounts sum to `subtotal`, and that `subtotal + tax + shipping` equals `total`. When `subtotal` is absent, the line sum SHALL stand in for it, and absent `tax` or `shipping` count as zero. Under $0.01 SHALL raise nothing; over `MATH_ROUNDING_TOLERANCE_USD` (default 1.00), or a line with no amount and no unit price, SHALL yield CRITICAL `MATH_MISMATCH` citing the expected and actual values.
 
 #### Scenario: Line sum disagrees with subtotal
 - **WHEN** INV-1009 states a subtotal of $1,000.00 but its lines sum to -$250.00
@@ -95,14 +95,29 @@ The system SHALL check, with a tolerance of $0.01, that each line's `quantity ×
 
 #### Scenario: Shipping included in the total
 - **WHEN** INV-1010 has subtotal $6,700, tax $335, and shipping $150, against a total of $7,185
-- **THEN** no `MATH_MISMATCH` finding is raised
+- **THEN** neither `MATH_MISMATCH` nor `MATH_ROUNDING` is raised
 
 #### Scenario: No subtotal printed
 - **WHEN** INV-1002 states only a total of $15,000.00 and its one line is 20 × $750.00
-- **THEN** no `MATH_MISMATCH` finding is raised
+- **THEN** neither `MATH_MISMATCH` nor `MATH_ROUNDING` is raised
+
+### Requirement: Rounding differences go to review
+A math difference from $0.01 up to and including `MATH_ROUNDING_TOLERANCE_USD` SHALL yield WARNING `MATH_ROUNDING` instead of `MATH_MISMATCH`. Its evidence SHALL hold the check, the expected and actual values, the difference, and the tolerance. A tolerance of 0 SHALL make every difference of $0.01 or more a `MATH_MISMATCH`.
 
 #### Scenario: One-cent discrepancy
-- **WHEN** an invoice's stated total is $0.02 above `subtotal + tax + shipping`
+- **WHEN** an invoice's stated total is $0.02 above `subtotal + tax + shipping` with the default tolerance
+- **THEN** a WARNING `MATH_ROUNDING` finding cites the 0.02 difference and no `MATH_MISMATCH` is raised
+
+#### Scenario: Difference at the tolerance
+- **WHEN** an invoice's stated total is exactly $1.00 above `subtotal + tax + shipping` with the default tolerance
+- **THEN** a WARNING `MATH_ROUNDING` finding is raised
+
+#### Scenario: Difference over the tolerance
+- **WHEN** INV-1007's total of $15,525.00 is $110.00 below its subtotal plus tax of $15,635.00
+- **THEN** a CRITICAL `MATH_MISMATCH` finding is raised
+
+#### Scenario: Tolerance disabled
+- **WHEN** `MATH_ROUNDING_TOLERANCE_USD=0` and an invoice's total is $0.02 off
 - **THEN** a CRITICAL `MATH_MISMATCH` finding is raised
 
 ### Requirement: Duplicate detection (F10)
@@ -189,6 +204,17 @@ A weighted fraud score SHALL sum the signals present: urgency language, a wire-t
 #### Scenario: Split invoicing alone does not trip fraud
 - **WHEN** INV-1019 is validated with `PAYEE_CUMULATIVE_THRESHOLD` and `NEAR_THRESHOLD` as its only signals
 - **THEN** its score (0.35) is below the threshold and no `FRAUD_SUSPECTED` finding is raised
+
+### Requirement: Fraud weights setting merged over the defaults
+A `FRAUD_SIGNAL_WEIGHTS` setting SHALL be merged over the default weights: a signal it omits keeps its default weight, and a signal it sets to 0 is turned off.
+
+#### Scenario: Partial weights setting keeps the other defaults
+- **WHEN** `FRAUD_SIGNAL_WEIGHTS` sets only the seven original signals and INV-1017 is validated
+- **THEN** `prompt_injection` keeps its default weight of 0.60 and `FRAUD_SUSPECTED` is raised
+
+#### Scenario: Zero weight turns a signal off
+- **WHEN** `FRAUD_SIGNAL_WEIGHTS` sets `near_threshold` to 0
+- **THEN** the near-threshold signal adds nothing to the fraud score
 
 ### Requirement: Suspicious address signal (F11, P1)
 For every invoice with a vendor address, the Validation stage SHALL ask the configured LLM, with the address as untrusted data, whether it is plausible for a business supplier (structured answer: plausible yes/no, reason, confidence). An implausible verdict SHALL yield WARNING `SUSPICIOUS_ADDRESS` with `source` = `llm` and the address and reason as evidence. The assessment SHALL run even if the tool loop never asks for it. No configured address list SHALL be consulted.

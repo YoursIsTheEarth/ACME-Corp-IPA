@@ -10,6 +10,7 @@ import fake_llm
 from acme.approval import apply_policy
 from acme.ingestion.pdf import pdf_to_text
 from acme.models import Finding, FindingCode as C, FindingSource, InvoiceState, LineItem, Outcome, Severity
+from acme.settings import get_settings
 from acme.validation import fraud_score, run_checks, run_validation
 from acme.validation.checks import EXCERPT_CHARS, detect_prompt_injection
 from acme.validation.codes import for_prompt
@@ -95,6 +96,17 @@ def test_inv_1017_scores_080_with_fraud_suspected(ctx):
     findings = run_checks(invoice, ctx)
     assert _only(findings, C.FRAUD_SUSPECTED).evidence["signals"] == ["unknown_vendor", "prompt_injection"]
     assert {C.PROMPT_INJECTION_SUSPECTED, C.UNKNOWN_VENDOR, C.PRICE_VARIANCE} <= {f.code for f in findings}
+
+
+def test_inv_1017_fraud_flag_survives_an_older_weights_setting(ctx, monkeypatch):
+    """A .env written before payee_cumulative and prompt_injection existed (seen in a live run)."""
+    monkeypatch.setenv("FRAUD_SIGNAL_WEIGHTS", '{"urgency_language": 0.25, "wire_transfer": 0.25, '
+                       '"immediate_terms": 0.15, "relative_due_date": 0.15, "unknown_vendor": 0.20, '
+                       '"suspicious_address": 0.30, "near_threshold": 0.10}')
+    get_settings.cache_clear()
+    invoice = GOLDEN["invoice_1017.txt"]
+    ctx = assessed(dataclasses.replace(ctx, raw_text=_text("invoice_1017.txt")), invoice)
+    assert C.FRAUD_SUSPECTED in {f.code for f in run_checks(invoice, ctx)}
 
 
 def test_prompt_injection_rejects_with_the_fraud_flag(golden):

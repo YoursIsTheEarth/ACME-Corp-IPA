@@ -13,6 +13,18 @@ from typing import Annotated
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+DEFAULT_FRAUD_SIGNAL_WEIGHTS: dict[str, float] = {
+    "urgency_language": 0.25,
+    "wire_transfer": 0.25,
+    "immediate_terms": 0.15,
+    "relative_due_date": 0.15,
+    "unknown_vendor": 0.20,
+    "suspicious_address": 0.30,
+    "near_threshold": 0.10,
+    "payee_cumulative": 0.25,
+    "prompt_injection": 0.60,
+}
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -41,18 +53,9 @@ class Settings(BaseSettings):
 
     # Validation
     price_variance_pct: Decimal = Decimal("10")
+    math_rounding_tolerance_usd: Decimal = Decimal("1.00")  # math off by up to this much goes to review
     near_threshold_floor_usd: Decimal = Decimal("9500.00")
-    fraud_signal_weights: dict[str, float] = {
-        "urgency_language": 0.25,
-        "wire_transfer": 0.25,
-        "immediate_terms": 0.15,
-        "relative_due_date": 0.15,
-        "unknown_vendor": 0.20,
-        "suspicious_address": 0.30,
-        "near_threshold": 0.10,
-        "payee_cumulative": 0.25,
-        "prompt_injection": 0.60,
-    }
+    fraud_signal_weights: dict[str, float] = DEFAULT_FRAUD_SIGNAL_WEIGHTS  # a setting is merged over these
     fraud_threshold: float = 0.60
 
     # Payee registry: cumulative payee total over a rolling window
@@ -78,6 +81,12 @@ class Settings(BaseSettings):
         ".pdf", ".txt", ".csv", ".json", ".xml", ".eml",
     ]
     worker_concurrency: int = 1
+
+    @field_validator("fraud_signal_weights")
+    @classmethod
+    def _merge_fraud_weights(cls, value):
+        """A signal the setting omits keeps its default weight (an older .env cannot switch a signal off)."""
+        return {**DEFAULT_FRAUD_SIGNAL_WEIGHTS, **value}
 
     @field_validator("allowed_upload_extensions", mode="before")
     @classmethod

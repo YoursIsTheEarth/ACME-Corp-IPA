@@ -1,4 +1,4 @@
-"""Retry with exponential backoff on rate-limit (429) and server (5xx) errors.
+"""Retry with exponential backoff on rate-limit (429), server (5xx), timeout, and connection errors.
 
 Real provider SDKs are built with `max_retries=0` and wrapped by `RetryingChatMixin`,
 so the retry count is known and recorded in `llm_calls`.
@@ -7,12 +7,22 @@ so the retry count is known and recorded in `llm_calls`.
 import time
 from typing import Any
 
+import anthropic
+import httpx
+import openai
+
 BASE_DELAY_S = 0.5
 MAX_DELAY_S = 8.0
 sleep = time.sleep  # replaced in tests
 
 
+# Timeouts and failed connections (openai covers langchain-xai's timeout wrapper); never HTTP status errors
+_TRANSIENT = (openai.APIConnectionError, anthropic.APIConnectionError, httpx.TransportError)
+
+
 def is_retryable(exc: BaseException) -> bool:
+    if isinstance(exc, _TRANSIENT):
+        return True
     status = getattr(exc, "status_code", None)
     if status is None:
         status = getattr(getattr(exc, "response", None), "status_code", None)

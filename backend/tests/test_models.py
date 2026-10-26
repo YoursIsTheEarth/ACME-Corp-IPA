@@ -46,7 +46,7 @@ def test_codes_serialize_verbatim_and_severities():
     assert warning == {"UNKNOWN_VENDOR", "MISSING_DUE_DATE", "INVALID_DUE_DATE",
                        "DUE_BEFORE_INVOICE_DATE", "PRICE_VARIANCE", "SUSPICIOUS_ADDRESS",
                        "REVISION_CREDIT_DUE", "INVOICE_NUMBER_REUSED", "CURRENCY_UNSUPPORTED",
-                       "PAYEE_CUMULATIVE_THRESHOLD"}
+                       "PAYEE_CUMULATIVE_THRESHOLD", "MATH_ROUNDING"}
     info = {c.value for c in FindingCode if c.severity is Severity.INFO}
     assert info == {"REVISION", "SUPERSEDED_BY_REVISION", "NEAR_THRESHOLD", "CURRENCY_CONVERTED"}
 

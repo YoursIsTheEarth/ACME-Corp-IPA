@@ -64,9 +64,9 @@ Six agents share one `InvoiceState` object passed along a LangGraph `StateGraph`
 
 | Condition | Outcome |
 | --- | --- |
-| Any CRITICAL finding (unknown item, stock exceeded, negative qty, math mismatch, missing vendor, duplicate) | REJECT |
+| Any CRITICAL finding (unknown item, stock exceeded, negative qty, math off by more than $1.00, missing vendor, duplicate) | REJECT |
 | Fraud score at or above threshold, or prompt injection detected (`PROMPT_INJECTION_SUSPECTED`) | REJECT + fraud flag |
-| Any WARNING finding (price variance over 10%, due date before invoice date, payee over $10,000 in 30 days) | NEEDS REVIEW |
+| Any WARNING finding (price variance over 10%, due date before invoice date, payee over $10,000 in 30 days, math off by $1.00 or less) | NEEDS REVIEW |
 | Total over $10,000 with no findings | VP scrutiny: LLM review + Critic, then APPROVE or NEEDS REVIEW |
 | Total $10,000 or less with no findings | AUTO-APPROVE (the LLM still writes a one-line rationale) |
 | Revision of an invoice not yet paid | Replaces the original (marked Superseded, its queued payment cancelled); the revision is judged by the rows above as a new invoice for its full total |

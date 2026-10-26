@@ -74,16 +74,30 @@ def check_integrity(invoice: Invoice, ctx: ValidationContext) -> list[Finding]:
     return findings
 
 
+def _math_finding(message: str, check: str, expected: Decimal, actual: Decimal, **evidence) -> Finding | None:
+    """None under one cent; MATH_ROUNDING up to the rounding tolerance (review); MATH_MISMATCH beyond it."""
+    difference = abs(expected - actual)
+    if difference < TOLERANCE:
+        return None
+    tolerance = get_settings().math_rounding_tolerance_usd
+    if difference <= tolerance:
+        return finding(C.MATH_ROUNDING,
+                       f"{message} (difference {_money(difference)}, within the {_money(tolerance)} rounding tolerance)",
+                       check=check, **evidence, expected=_money(expected), actual=_money(actual),
+                       difference=_money(difference), tolerance=_money(tolerance))
+    return finding(C.MATH_MISMATCH, message, check=check, **evidence, expected=_money(expected), actual=_money(actual))
+
+
 def reconcile_math(invoice: Invoice, ctx: ValidationContext) -> list[Finding]:
-    """MATH_MISMATCH for line amounts, line sum vs subtotal, and the total (sub-cent differences tolerated)."""
+    """Line amounts, line sum vs subtotal, and the total: MATH_ROUNDING (WARNING) within the rounding tolerance,
+    MATH_MISMATCH (CRITICAL) beyond it; sub-cent differences tolerated."""
     findings = []
     line_sum = Decimal("0")
     for i, item in enumerate(invoice.line_items, 1):
         extended = None if item.unit_price is None else item.unit_price * item.quantity
-        if extended is not None and item.amount is not None and abs(extended - item.amount) >= TOLERANCE:
-            findings.append(finding(C.MATH_MISMATCH, f"Line {i}: {item.quantity} x {item.unit_price} != {item.amount}",
-                                    check="line_amount", line=i, expected=_money(extended),
-                                    actual=_money(item.amount)))
+        if extended is not None and item.amount is not None:
+            findings.append(_math_finding(f"Line {i}: {item.quantity} x {item.unit_price} != {item.amount}",
+                                          "line_amount", extended, item.amount, line=i))
         amount = item.amount if item.amount is not None else extended
         if amount is None:
             findings.append(finding(C.MATH_MISMATCH, f"Line {i} has neither an amount nor a unit price",
@@ -91,17 +105,15 @@ def reconcile_math(invoice: Invoice, ctx: ValidationContext) -> list[Finding]:
             continue
         line_sum += amount
     subtotal = invoice.subtotal if invoice.subtotal is not None else line_sum
-    if invoice.subtotal is not None and abs(line_sum - invoice.subtotal) >= TOLERANCE:
-        findings.append(finding(C.MATH_MISMATCH,
-                                f"Line items sum to {_money(line_sum)} but the subtotal is {_money(invoice.subtotal)}",
-                                check="subtotal", expected=_money(line_sum), actual=_money(invoice.subtotal)))
+    if invoice.subtotal is not None:
+        findings.append(_math_finding(
+            f"Line items sum to {_money(line_sum)} but the subtotal is {_money(invoice.subtotal)}",
+            "subtotal", line_sum, invoice.subtotal))
     expected_total = subtotal + invoice.tax + invoice.shipping
-    if abs(expected_total - invoice.total) >= TOLERANCE:
-        findings.append(finding(C.MATH_MISMATCH,
-                                f"Subtotal + tax + shipping is {_money(expected_total)} "
-                                f"but the total is {_money(invoice.total)}",
-                                check="total", expected=_money(expected_total), actual=_money(invoice.total)))
-    return findings
+    findings.append(_math_finding(
+        f"Subtotal + tax + shipping is {_money(expected_total)} but the total is {_money(invoice.total)}",
+        "total", expected_total, invoice.total))
+    return [f for f in findings if f is not None]
 
 
 def check_vendor(invoice: Invoice, ctx: ValidationContext) -> list[Finding]:

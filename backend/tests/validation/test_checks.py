@@ -105,18 +105,48 @@ def test_reconciles(ctx, golden, name):
     assert reconcile_math(golden[name], ctx) == []
 
 
-def test_two_cents_over_is_flagged(ctx, golden):
+def test_two_cents_over_is_a_rounding_warning(ctx, golden):
     invoice = golden["invoice_1010.txt"].model_copy(update={"total": Decimal("7185.02")})
     [f] = reconcile_math(invoice, ctx)
-    assert f.evidence == {"check": "total", "expected": "7185.00", "actual": "7185.02"}
+    assert (f.code, f.severity) == (C.MATH_ROUNDING, Severity.WARNING)
+    assert f.evidence == {"check": "total", "expected": "7185.00", "actual": "7185.02", "difference": "0.02",
+                          "tolerance": "1.00"}
+    assert "within the 1.00 rounding tolerance" in f.message
 
 
 def test_one_cent_off_is_flagged_sub_cent_is_not(ctx, golden):
-    """Adversarial case (agent-workflow spec): a total off by $0.01 is a MATH_MISMATCH."""
+    """Adversarial case (agent-workflow spec): a total off by $0.01 goes to review as MATH_ROUNDING."""
     base = golden["invoice_1001.txt"]
     [f] = reconcile_math(base.model_copy(update={"total": Decimal("5000.01")}), ctx)
-    assert (f.code, f.evidence) == (C.MATH_MISMATCH, {"check": "total", "expected": "5000.00", "actual": "5000.01"})
+    assert (f.code, f.evidence["difference"]) == (C.MATH_ROUNDING, "0.01")
     assert reconcile_math(base.model_copy(update={"total": Decimal("5000.004")}), ctx) == []
+
+
+@pytest.mark.parametrize("total, code", [("5001.00", C.MATH_ROUNDING), ("5001.01", C.MATH_MISMATCH),
+                                         ("4998.99", C.MATH_MISMATCH)])
+def test_rounding_tolerance_boundary(ctx, golden, total, code):
+    [f] = reconcile_math(golden["invoice_1001.txt"].model_copy(update={"total": Decimal(total)}), ctx)
+    assert f.code == code
+
+
+def test_over_tolerance_keeps_the_mismatch_evidence(ctx, golden):
+    [f] = reconcile_math(golden["invoice_1001.txt"].model_copy(update={"total": Decimal("5110.00")}), ctx)
+    assert (f.code, f.severity, f.evidence) == (C.MATH_MISMATCH, Severity.CRITICAL,
+                                                {"check": "total", "expected": "5000.00", "actual": "5110.00"})
+
+
+def test_zero_tolerance_rejects_any_cent(ctx, golden, monkeypatch):
+    monkeypatch.setenv("MATH_ROUNDING_TOLERANCE_USD", "0")
+    get_settings.cache_clear()
+    [f] = reconcile_math(golden["invoice_1001.txt"].model_copy(update={"total": Decimal("5000.02")}), ctx)
+    assert f.code == C.MATH_MISMATCH
+
+
+def test_line_without_amount_or_price_is_a_mismatch(ctx, golden):
+    invoice = golden["invoice_1001.txt"]
+    invoice.line_items[0].unit_price = None
+    invoice.line_items[0].amount = None
+    assert C.MATH_MISMATCH in codes(reconcile_math(invoice, ctx))
 
 
 def test_line_amount_mismatch(ctx, golden):

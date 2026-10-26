@@ -9,6 +9,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from acme.ingestion.schema import ExtractedInvoice
 from acme.llm import get_chat_model
 from acme.normalization.cleaners import fix_ocr, parse_money
+from acme.settings import get_settings
 
 PROMPT_VERSION = "extraction.v3"
 PROMPTS_DIR = Path(__file__).resolve().parents[3] / "prompts"
@@ -57,7 +58,8 @@ def _money(value) -> Decimal | None:
 
 
 def check_line_sum(extracted: ExtractedInvoice) -> None:
-    """D5: line amounts (or qty x unit price) must sum to the subtotal, else the total, within $0.01."""
+    """D5: line amounts (or qty x unit price) must sum to the subtotal, else the total, within $0.01 or the
+    rounding tolerance, whichever is larger (validation sends a rounding difference to review)."""
     lines = Decimal("0")
     for i, item in enumerate(extracted.line_items, 1):
         amount = _money(item.amount)
@@ -69,7 +71,7 @@ def check_line_sum(extracted: ExtractedInvoice) -> None:
         lines += amount
     subtotal = _money(extracted.subtotal)
     label, expected = ("subtotal", subtotal) if subtotal is not None else ("total", _money(extracted.total))
-    if expected is None or abs(lines - expected) > TOLERANCE:
+    if expected is None or abs(lines - expected) > max(TOLERANCE, get_settings().math_rounding_tolerance_usd):
         raise ValueError(
             f"line items sum to {lines:.2f} but the {label} reads {expected}; "
             f"difference {abs(lines - (expected or 0)):.2f}. Re-read every line item and the {label}."
