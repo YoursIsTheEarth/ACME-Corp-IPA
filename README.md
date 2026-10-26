@@ -1,5 +1,75 @@
 # Galatiq Case: Invoice Processing Automation
 
+## Solution overview
+
+Acme loses about $2M a year to manual invoice handling: a 30% error rate, 5-day delays, and VP approvals lost in email chains. This prototype takes any invoice file (PDF, TXT, CSV, JSON, XML, or email) and ends in exactly one outcome: **paid**, **rejected with reasons**, or **held for a person to decide**. Every outcome can be traced to a finding, a rule, or an LLM rationale in an audit trail. It runs from the CLI (`python main.py --invoice_path=...`) and from a web app where staff upload invoices, decide held ones, and release payments.
+
+### Quickstart
+
+```bash
+cp .env.example .env              # add XAI_API_KEY (see "Configure an LLM key" below)
+make backend-setup                # creates backend/.venv and installs the backend (no make: see backend/README.md)
+python main.py --invoice_path=data/invoices/invoice_1001.txt
+python main.py --batch data/invoices --pay      # all 26 sample files, then one payment batch
+make setup && make dev            # optional web app on http://localhost:4200 (needs Node 20+)
+```
+
+`main.py` switches to `backend/.venv` by itself, so there is no need to activate it. If setup hasn't been run, it prints the setup steps instead of a traceback.
+
+### Business impact
+
+| Today's pain | What the system does instead |
+| --- | --- |
+| 30% error rate from manual keying | The LLM extracts fields, and plain Python checks them: stock, unknown items, line and total math, duplicates, price variance against the catalog, and due dates. A bad extraction is retried twice, then fails closed instead of guessing. |
+| 5-day processing delays | Clean invoices of $10,000 or less are approved and queued as soon as they arrive. People spend time only on the invoices that are held, and each one shows why it is held and the AI's recommendation. |
+| VP approvals buried in email | An AI VP reviews invoices over $10,000 and a Critic agent checks its draft against the rules and evidence. Anything uncertain goes to the Invoice Elevated Review page, where a named reviewer decides with a written rationale, and the same run resumes. |
+| Fraud and wrong payments | Unknown vendors, implausible addresses, inflated prices, prompt injection hidden in the document, and split invoicing (one payee billing just under $10K repeatedly, even under different names at one address) are caught. Payments are idempotent per vendor, invoice, and revision, so nothing is paid twice. |
+| No visibility | The Resolution Audit and Payments pages, `--explain <run_id>`, and `reports/summary.md` show each step, finding, rule, model, and decision. |
+
+### Architecture
+
+Six agents share one state object in a LangGraph `StateGraph`, checkpointed to SQLite so a held invoice can wait days and resume where it stopped.
+
+```mermaid
+flowchart LR
+    F[Invoice file] --> I[Ingestion<br/>parse + LLM extract<br/>self-correct ×2]
+    I --> N[Normalizer<br/>SKUs, dates, OCR typos]
+    N --> V[Validation<br/>LLM tool-calling loop<br/>+ every deterministic check]
+    V --> A[AI VP<br/>rules engine first]
+    A <-->|revise ≤2 rounds| C[Critic]
+    A --> D[Disposition]
+    D -->|approve| Q[(Payment Queue)]
+    D -->|reject| R[Rejected + reasons]
+    D -->|needs review| H[Elevated Review<br/>human decides] --> D
+    Q --> P[Payment batch<br/>mock_payment]
+    I -. failed .-> D
+```
+
+| Requirement | Where it is |
+| --- | --- |
+| Grok as the reasoning engine | `langchain-xai` (`grok-4`); Claude is an alternative provider (`LLM_PROVIDER=claude`). Checked against the live Grok API |
+| Multi-agent orchestration | LangGraph, `backend/src/acme/graph/` |
+| Tool use | The Validation agent calls `lookup_item`, `check_stock`, `reconcile_math`, `check_duplicate`, and the vendor and fraud checks as tools (`validation/tools.py`) |
+| Structured outputs | Extraction, address judgment, the AI VP's decision, and the Critic's verdict are Pydantic schemas (`with_structured_output`) |
+| Self-correction loops | Extraction retries with the error fed back, Validation calls tools until it is done, and the AI VP revises until the Critic passes |
+| Mock inventory DB | SQLite `acme.db` (the case's `inventory.db`, extended with prices, aliases, vendors, and payees), created by `python main.py` or `python -m acme.db seed` |
+| Mock payment | `mock_payment(vendor, amount)` as given (`payments/mock_bank.py`), called only by the payment executor |
+
+### Key decisions and tradeoffs
+
+- **The LLM reads and reasons; code decides about money.** Stock, arithmetic, duplicates, and approval limits are deterministic Python, so outcomes are testable and repeatable. A CRITICAL finding forces a rejection the LLM can explain but not override, and the LLM may make an outcome stricter but never looser. This is also why the prompt-injection invoice (INV-1017) cannot talk its way to an approval.
+- **A real LLM, not a simulation.** The case says to simulate everything locally. We kept payment and inventory local but run the agents on Grok (or Claude), because a scripted model would only show that the plumbing works. The cost is that processing needs an API key. Without one, the app says so plainly and processes nothing (see below).
+- **Fail closed and hold rather than guess.** A failed extraction, an unreachable model, or an ambiguous case never produces a payment. It ends rejected or held, with the reason shown.
+- **Pay in batches, not inside the agent run.** Approval only queues a payment. Payment timing (delay, end of day, or when the queue is empty) is set on the Admin page, so finance controls when money moves.
+- **Tested without the network.** About 980 tests (backend, frontend, and Playwright end-to-end) run on a deterministic fake model that no setting can select in production. A 26-file golden suite pins the expected outcome of every sample invoice.
+
+### What was cut, and known limits
+
+- No real email intake, bank API, login, or cloud deployment, as the case allows.
+- No OCR: an image-only PDF fails closed. All the provided PDFs have a text layer.
+- Reviewer names are typed by hand, with no authentication.
+- Non-USD amounts are converted at fixed configured rates, not live FX; an unsupported currency is held for review.
+
 ## Configure an LLM key (read first)
 
 The agents in this solution run on a real LLM: xAI Grok (the default) or Anthropic Claude. The case text below says to assume no internet and simulate everything locally; we decided against a simulated model, so offline mode was removed and invoices are processed only when an API key is set. Mock payment and inventory still run locally.
@@ -132,6 +202,8 @@ python main.py --invoice_path=data/invoices/invoice1.txt
 ```
 
 Output should include structured logs and results.
+
+Setup for this command is in the [Quickstart](#quickstart) above (`make backend-setup`, plus an LLM key in `.env`).
 
 ## Evaluation Criteria
 
