@@ -60,7 +60,8 @@ def _or_zero(amount: Decimal | None) -> Decimal:
 
 def _build(extracted: ExtractedInvoice, n: _Normalizer) -> Invoice:
     due_date = n.date("due_date", extracted.due_date)
-    raw_due = extracted.due_date if isinstance(extracted.due_date, str) and extracted.due_date.strip() else None
+    raw_due = next((v for v in (extracted.due_date, extracted.due_date_raw) if isinstance(v, str) and v.strip()),
+                   None)  # the LLM may put a worded date in due_date_raw
     return Invoice(
         invoice_number=normalize_invoice_number(extracted.invoice_number),
         revision=normalize_revision(extracted.revision),

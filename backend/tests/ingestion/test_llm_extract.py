@@ -190,6 +190,8 @@ def test_worded_due_date_left_null_by_the_model_is_copied_from_the_text(db, stub
     path.write_text("Invoice Number: INV-1003\nDate: 2026-01-20\nDue Date: yesterday\nTotal: $1.00\n")
     stub_model({**VALID, "due_date": None})
     assert ingest(path).extracted.due_date == "yesterday"
+    stub_model({**VALID, "due_date": ""})
+    assert ingest(path).extracted.due_date == "yesterday"
 
 
 def test_due_date_found_by_the_model_is_kept(db, stub_model, tmp_path):

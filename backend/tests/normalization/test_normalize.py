@@ -88,6 +88,14 @@ def test_relative_due_date_kept_raw(seeded_db):
     assert normalizer_calls(seeded_db) == 0  # relative words never go to the LLM
 
 
+def test_worded_due_date_in_due_date_raw_is_kept(seeded_db):
+    # Live Grok put "yesterday" in due_date_raw and left due_date blank (INV-1003)
+    extracted = ExtractedInvoice(invoice_number="INV-1003", invoice_date="2026-01-20", due_date="",
+                                 due_date_raw="yesterday", total="$1.00")
+    invoice, _ = normalize(extracted, run_id="r-raw")
+    assert invoice.due_date is None and invoice.due_date_raw == "yesterday"
+
+
 def test_null_due_date_and_negative_total(seeded_db):
     invoice, findings = run("invoice_1009.json")
     assert invoice.due_date is None and invoice.due_date_raw is None and findings == []

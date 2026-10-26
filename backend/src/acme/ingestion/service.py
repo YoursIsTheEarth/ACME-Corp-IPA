@@ -37,7 +37,8 @@ _DUE_LINE = re.compile(r"^\s*Due(?:\s+Date)?\s*:\s*(\S.*?)\s*$", re.IGNORECASE |
 
 def _printed_due_date(extracted: ExtractedInvoice, text: str) -> ExtractedInvoice:
     """The LLM may leave a worded due date ("yesterday") null; copy a printed "Due Date:" value as found."""
-    if extracted.due_date is None and (match := _DUE_LINE.search(text)):
+    blank = extracted.due_date is None or (isinstance(extracted.due_date, str) and not extracted.due_date.strip())
+    if blank and not extracted.due_date_raw and (match := _DUE_LINE.search(text)):
         return extracted.model_copy(update={"due_date": match.group(1)})
     return extracted
 
