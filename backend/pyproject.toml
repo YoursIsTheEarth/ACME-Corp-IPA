@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "acme"
+version = "0.1.0"
+description = "Acme Invoice Agents backend"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic~=2.14",
+    "pydantic-settings~=2.16",
+    "langchain-core~=1.7",
+    "langchain-xai~=1.3",
+    "langchain-anthropic~=1.7",
+    "pdfplumber~=0.11",
+    "rapidfuzz~=3.14",
+    "python-dateutil~=3.0",
+    "langgraph~=1.2",
+    "langgraph-checkpoint-sqlite~=3.1",
+    "rich~=15.0",
+    "fastapi~=0.162",
+    "uvicorn[standard]~=0.54",
+    "python-multipart~=0.0.32",
+    "apscheduler~=3.11",
+    "sse-starlette~=3.6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest~=9.1", "httpx~=0.28"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+acme = ["db/schema.sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

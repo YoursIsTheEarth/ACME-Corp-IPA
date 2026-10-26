@@ -1,0 +1,27 @@
+Run run-d298e334171a: invoice_1004.json  INV-1004 Precision Parts Ltd.  status Superseded
+2026-10-26T18:48:00.962546+00:00  ingestion  extraction_attempt
+  attempt 1 (json): accepted
+2026-10-26T18:48:00.965559+00:00  ingestion  ingestion.result
+  format json, 1 attempt(s), 0 retries
+2026-10-26T18:48:00.970204+00:00  normalizer  normalized
+  invoice number 'INV-1004' -> INV-1004
+  item 'WidgetA' -> WidgetA (exact)
+  item 'WidgetB' -> WidgetB (exact)
+2026-10-26T18:48:08.700705+00:00  validation  validation.tool_calls
+  round 1 [grok/grok-4]: lookup_item, check_stock, reconcile_math, check_integrity, check_duplicate, check_payee_threshold, check_vendor, detect_prompt_injection, fraud_signals, check_prices
+2026-10-26T18:48:10.508061+00:00  validation  validation.summary
+  {"rounds": 1, "summary": "INV-1004 from Precision Parts Ltd. passes all checks except one: SUSPICIOUS_ADDRESS (WARNING) due to the implausible residential Simpsons address. No other findings.", "provider": "grok", "model": "grok-4"}
+2026-10-26T18:48:10.522323+00:00  validation  validation.findings
+    WARNING SUSPICIOUS_ADDRESS: Vendor address is implausible for a business supplier: 742 Evergreen Terrace, Springfield, IL 62704 is the fictional residential address of the Simpson family from the TV show The Simpsons, not a commercial supplier location.  evidence={"address": "742 Evergreen Terrace, Springfield, IL 62704", "reason": "742 Evergreen Terrace, Springfield, IL 62704 is the fictional residential address of the Simpson family from the TV show The Simpsons, not a commercial supplier location.", "confidence": 0.85}
+2026-10-26T18:48:10.537414+00:00  approval  approval.policy
+  floor NEEDS_REVIEW; rules fired: WARNING_SUSPICIOUS_ADDRESS
+2026-10-26T18:48:32.557402+00:00  approval  approval.draft
+  AI VP draft round 0 [grok/grok-4]: NEEDS_REVIEW - Needs review (WARNING_SUSPICIOUS_ADDRESS): Vendor address 742 Evergreen Terrace, Springfield, IL 62704 is the fictional Simpson family residence, not a commercial supplier.
+2026-10-26T18:48:32.562517+00:00  approval  approval.decision
+  decision NEEDS_REVIEW by Auto (rules): Needs review (WARNING_SUSPICIOUS_ADDRESS): Vendor address 742 Evergreen Terrace, Springfield, IL 62704 is the fictional Simpson family residence, not a commercial supplier. AI recommendation: NEEDS_REVIEW.
+2026-10-26T18:48:32.579905+00:00  disposition  review.enqueued
+  held for review (warning): SUSPICIOUS_ADDRESS: Vendor address is implausible for a business supplier: 742 Evergreen Terrace, Springfield, IL 62704 is the fictional residential address of the Simpson family from the TV show The Simpsons, not a commercial supplier location.
+2026-10-26T18:48:32.581902+00:00  disposition  disposition.outcome
+  outcome NEEDS_REVIEW -> Awaiting review
+2026-10-26T18:48:47.397265+00:00  disposition  invoice.superseded
+  {"finding": {"code": "SUPERSEDED_BY_REVISION", "severity": "INFO", "message": "Superseded by revision 1 of INV-1004", "evidence": {"revision": 1, "revision_run_id": "run-227f18f5397d", "cancelled_rows": []}, "source": "rule"}}

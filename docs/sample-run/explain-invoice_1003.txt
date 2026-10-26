@@ -1,0 +1,32 @@
+Run run-abe0f05b898a: invoice_1003.txt  INV-1003 Fraudster LLC  status Rejected
+2026-10-26T18:47:52.519592+00:00  ingestion  extraction_attempt
+  attempt 1 (txt): accepted
+2026-10-26T18:47:52.523337+00:00  ingestion  ingestion.result
+  format txt, 1 attempt(s), 0 retries
+2026-10-26T18:47:52.531680+00:00  normalizer  normalized
+  invoice number 'INV-1003' -> INV-1003
+  item 'FakeItem' -> FakeItem (exact)
+2026-10-26T18:47:54.544237+00:00  validation  validation.tool_calls
+  round 1 [grok/grok-4]: lookup_item, check_stock, reconcile_math, check_integrity, check_duplicate, check_payee_threshold, check_vendor, detect_prompt_injection, fraud_signals, check_prices
+2026-10-26T18:47:56.532235+00:00  validation  validation.summary
+  {"rounds": 1, "summary": "INV-1003 from Fraudster LLC fails multiple checks: unknown vendor, FakeItem out of stock (100 billed), invalid due date (\"yesterday\"), and fraud signals (urgency, wire, immediate terms, relative date).", "provider": "grok", "model": "grok-4"}
+2026-10-26T18:47:56.543598+00:00  validation  validation.findings
+    CRITICAL ZERO_STOCK: FakeItem is out of stock (billed 100)  evidence={"sku": "FakeItem", "billed": 100, "stock": 0}
+    WARNING INVALID_DUE_DATE: Due date 'yesterday' is not a date  evidence={"due_date_raw": "yesterday"}
+    WARNING UNKNOWN_VENDOR: Vendor 'Fraudster LLC' is not on the approved vendor list  evidence={"vendor_name": "Fraudster LLC"}
+    CRITICAL FRAUD_SUSPECTED: Fraud score 1.00 >= 0.60: urgency_language, wire_transfer, immediate_terms, relative_due_date, unknown_vendor  evidence={"score": 1.0, "threshold": 0.6, "signals": ["urgency_language", "wire_transfer", "immediate_terms", "relative_due_date", "unknown_vendor"]}
+2026-10-26T18:47:56.563989+00:00  approval  approval.policy
+  floor REJECT; rules fired: CRITICAL_ZERO_STOCK, CRITICAL_FRAUD_SUSPECTED
+2026-10-26T18:48:00.891289+00:00  approval  approval.draft
+  AI VP draft round 0 [grok/grok-4]: REJECT - Rejected (CRITICAL_ZERO_STOCK, CRITICAL_FRAUD_SUSPECTED): FakeItem billed 100 against 0 in stock. Fraud score 1.00 with signals urgency_language, wire_transfer, immediate_terms, relative_due_date, unknown_vendor. Also UNKNOWN_VENDOR and INVALID_DUE_DATE.
+2026-10-26T18:48:00.893208+00:00  approval  approval.decision
+  decision REJECT by Auto (rules): Rejected (CRITICAL_ZERO_STOCK, CRITICAL_FRAUD_SUSPECTED): FakeItem billed 100 against 0 in stock. Fraud score 1.00 with signals urgency_language, wire_transfer, immediate_terms, relative_due_date, unknown_vendor. Also UNKNOWN_VENDOR and INVALID_DUE_DATE.
+2026-10-26T18:48:00.905292+00:00  disposition  rejection.recorded
+  Rejected by Auto (rules): Rejected (CRITICAL_ZERO_STOCK, CRITICAL_FRAUD_SUSPECTED): FakeItem billed 100 against 0 in stock. Fraud score 1.00 with signals urgency_language, wire_transfer, immediate_terms, relative_due_date, unknown_vendor. Also UNKNOWN_VENDOR and INVALID_DUE_DATE.
+  rules: CRITICAL_ZERO_STOCK, CRITICAL_FRAUD_SUSPECTED
+    CRITICAL ZERO_STOCK: FakeItem is out of stock (billed 100)  evidence={"sku": "FakeItem", "billed": 100, "stock": 0}
+    WARNING INVALID_DUE_DATE: Due date 'yesterday' is not a date  evidence={"due_date_raw": "yesterday"}
+    WARNING UNKNOWN_VENDOR: Vendor 'Fraudster LLC' is not on the approved vendor list  evidence={"vendor_name": "Fraudster LLC"}
+    CRITICAL FRAUD_SUSPECTED: Fraud score 1.00 >= 0.60: urgency_language, wire_transfer, immediate_terms, relative_due_date, unknown_vendor  evidence={"score": 1.0, "threshold": 0.6, "signals": ["urgency_language", "wire_transfer", "immediate_terms", "relative_due_date", "unknown_vendor"]}
+2026-10-26T18:48:00.906910+00:00  disposition  disposition.outcome
+  outcome REJECT -> Rejected

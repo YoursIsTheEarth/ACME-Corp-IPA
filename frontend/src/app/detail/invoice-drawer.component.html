@@ -1,0 +1,108 @@
+<header class="head">
+  <div class="title">
+    @if (current(); as d) {
+      <h2>{{ d.invoice_number ?? d.file_name }}</h2>
+      <div class="sub">
+        {{ d.vendor ?? 'Vendor unknown' }} · {{ d.amount_usd | usd }}
+        <app-status-chip [status]="status()" />
+      </div>
+    } @else {
+      <h2>Loading…</h2>
+    }
+  </div>
+  <a mat-stroked-button [href]="fileUrl()" download data-testid="download"><mat-icon>download</mat-icon>Original</a>
+  <button mat-icon-button type="button" (click)="closed.emit()" aria-label="Close details" data-testid="drawer-close">
+    <mat-icon>close</mat-icon>
+  </button>
+</header>
+
+@if (!current()) {
+  <mat-progress-bar mode="indeterminate" />
+}
+
+<div class="body">
+  <section class="preview" data-testid="preview">
+    <h3><mat-icon inline>{{ current()?.format | fileIcon }}</mat-icon> {{ current()?.file_name }}</h3>
+    @switch (preview()?.kind) {
+      @case ('text') {
+        <pre data-testid="preview-text">{{ $any(preview()).text }}</pre>
+      }
+      @case ('pdf') {
+        <object [data]="$any(preview()).url" type="application/pdf" class="pdf" data-testid="preview-pdf">
+          <p>This browser can't show the PDF inline. <a [href]="fileUrl()" download>Download the original</a>.</p>
+        </object>
+      }
+      @case ('none') {
+        <p class="muted" data-testid="preview-none">
+          The original can't be shown here. <a [href]="fileUrl()" download>Download the original file</a>.
+        </p>
+      }
+      @default {
+        <mat-progress-bar mode="indeterminate" />
+      }
+    }
+  </section>
+
+  @if (current(); as d) {
+    <section class="facts">
+      <h3>Extracted fields</h3>
+      @if (d.invoice; as inv) {
+        <dl class="fields">
+          <dt>Invoice #</dt><dd>{{ inv.invoice_number }}{{ inv.revision ? ' R' + inv.revision : '' }}</dd>
+          <dt>Vendor</dt><dd>{{ inv.vendor_name ?? '—' }}</dd>
+          @if (inv.vendor_address) { <dt>Address</dt><dd>{{ inv.vendor_address }}</dd> }
+          <dt>Invoice date</dt><dd>{{ inv.invoice_date ?? '—' }}</dd>
+          <dt>Due date</dt><dd>{{ inv.due_date ?? inv['due_date_raw'] ?? '—' }}</dd>
+          <dt>Currency</dt><dd>{{ inv.original_currency ?? inv.currency ?? 'USD' }}</dd>
+          @if (inv.original_total) { <dt>Original total</dt><dd>{{ inv.original_currency }} {{ inv.original_total }}</dd> }
+          <dt>Total (USD)</dt><dd>{{ d.amount_usd | usd }}</dd>
+        </dl>
+        <table class="lines">
+          <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>Amount</th></tr></thead>
+          <tbody>
+            @for (li of lineItems(); track $index) {
+              <tr>
+                <td>{{ li.sku ?? li.raw_name }}@if (li.sku && li.raw_name && li.sku !== li.raw_name) { <span class="muted"> ({{ li.raw_name }})</span> }</td>
+                <td>{{ li.quantity }}</td>
+                <td>{{ li.unit_price }}</td>
+                <td>{{ li.amount }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+        @if (inv['subtotal'] || inv['tax'] || inv['total']) {
+          <div class="totals muted small">
+            @if (inv['subtotal']) { Subtotal {{ inv['subtotal'] }} · }
+            @if (inv['tax']) { Tax {{ inv['tax'] }} · }
+            @if (inv['total']) { Total {{ inv['total'] }} }
+          </div>
+        }
+      } @else {
+        <p class="muted">Not extracted yet.</p>
+      }
+
+      <h3>Findings</h3>
+      @for (f of d.findings; track $index) {
+        <div class="finding" [class]="'finding ' + (f.severity ?? '').toLowerCase()">
+          <b>{{ f.code | finding }}</b> <span class="muted small">{{ f.severity }}</span>
+          <div>{{ f.message }}</div>
+        </div>
+      } @empty {
+        <p class="muted" data-testid="no-findings">No findings.</p>
+      }
+
+      @if (d.decision; as dec) {
+        <h3>Decision</h3>
+        <p><b>{{ dec.outcome }}</b> · {{ d.decided_by ?? dec.decided_by }}</p>
+        <p class="small">{{ dec.rationale }}</p>
+      }
+    </section>
+  }
+</div>
+
+@if (current(); as d) {
+  <section class="timeline-section">
+    <h3>Stage timeline</h3>
+    <app-run-timeline [detail]="d" />
+  </section>
+}

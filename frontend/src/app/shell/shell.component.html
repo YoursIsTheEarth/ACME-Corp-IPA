@@ -1,0 +1,110 @@
+<ng-template #navList let-labels="labels" let-list="items" let-kind="kind">
+  <mat-nav-list [class]="'nav ' + kind + '-nav'" [attr.data-testid]="kind + '-nav'">
+    @for (item of list; track item.path) {
+      <a
+        mat-list-item
+        [routerLink]="item.path"
+        routerLinkActive="active"
+        #rla="routerLinkActive"
+        [routerLinkActiveOptions]="{ exact: item.path === '/' }"
+        [activated]="rla.isActive"
+        [attr.aria-current]="rla.isActive ? 'page' : null"
+        [matTooltip]="labels ? '' : item.label"
+        matTooltipPosition="right"
+        [attr.data-testid]="'nav-' + item.path"
+      >
+        <mat-icon
+          matListItemIcon
+          [matBadge]="badge(item)"
+          [matBadgeHidden]="!badge(item)"
+          matBadgeSize="small"
+          matBadgeColor="warn"
+          [matBadgeOverlap]="true"
+          aria-hidden="false"
+          [attr.aria-label]="badge(item) ? badge(item) + ' waiting' : null"
+          >{{ item.icon }}</mat-icon
+        >
+        @if (labels) {
+          <span matListItemTitle>{{ item.label }}</span>
+        }
+        @if (labels && badge(item)) {
+          <span matListItemMeta class="count-pill" [attr.data-testid]="'badge-' + item.path">{{ badge(item) }}</span>
+        }
+      </a>
+    }
+  </mat-nav-list>
+</ng-template>
+
+<mat-sidenav-container class="container" [class.narrow]="narrow()">
+  <mat-sidenav
+    #nav
+    class="sidebar"
+    [mode]="narrow() ? 'over' : 'side'"
+    [opened]="!narrow()"
+    [disableClose]="!narrow()"
+    data-testid="sidenav"
+  >
+    <div class="brand">
+      <mat-icon class="logo">receipt_long</mat-icon>
+      <div>
+        <div class="name">ACME Corp IPA</div>
+        <div class="tagline">Invoice Processing Automation</div>
+      </div>
+    </div>
+    <ng-container *ngTemplateOutlet="navList; context: { labels: true, items: items, kind: 'main' }" />
+    <div class="nav-spacer"></div>
+    <ng-container *ngTemplateOutlet="navList; context: { labels: true, items: adminItems, kind: 'admin' }" />
+    <div class="sidebar-footer" data-testid="llm-footer">
+      <div class="live" [class.on]="live()">
+        <span class="dot"></span>{{ live() ? 'Live' : 'Polling every 3 s' }}
+      </div>
+      @if (provider()) {
+        <div class="llm">
+          <mat-icon inline>smart_toy</mat-icon>
+          <span class="provider" data-testid="llm-provider">{{ provider() }}</span>
+          <span class="model" data-testid="llm-model">{{ model() }}</span>
+        </div>
+      } @else {
+        <div class="llm muted">Connecting to backend…</div>
+      }
+    </div>
+  </mat-sidenav>
+
+  <mat-sidenav
+    class="detail-drawer"
+    position="end"
+    mode="over"
+    [opened]="!!invoiceId()"
+    (closedStart)="drawer.close()"
+    data-testid="detail-drawer"
+  >
+    @if (invoiceId(); as id) {
+      <app-invoice-drawer [invoiceId]="id" (closed)="drawer.close()" />
+    }
+  </mat-sidenav>
+
+  <mat-sidenav-content class="content">
+    @if (narrow()) {
+      <div class="rail" data-testid="rail">
+        <button mat-icon-button type="button" (click)="toggleNav()" aria-label="Open menu" data-testid="menu-toggle">
+          <mat-icon>menu</mat-icon>
+        </button>
+        <ng-container *ngTemplateOutlet="navList; context: { labels: false, items: items, kind: 'main' }" />
+        <div class="nav-spacer"></div>
+        <ng-container *ngTemplateOutlet="navList; context: { labels: false, items: adminItems, kind: 'admin' }" />
+      </div>
+    }
+    <main class="main">
+      @if (missingKey(); as key) {
+        <div class="llm-banner" role="alert" data-testid="llm-banner">
+          <mat-icon>error</mat-icon>
+          <div>
+            <strong>{{ noToken }}</strong>
+            <div>{{ keyHint(key) }}</div>
+          </div>
+        </div>
+      }
+      <router-outlet />
+    </main>
+  </mat-sidenav-content>
+</mat-sidenav-container>

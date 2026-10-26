@@ -1,0 +1,30 @@
+Run run-fb02e705615f: invoice_1018.txt  INV-1018 Northwind Fabrication LLC  status Awaiting review
+2026-10-26T18:52:22.332445+00:00  ingestion  extraction_attempt
+  attempt 1 (txt): accepted
+2026-10-26T18:52:22.338743+00:00  ingestion  ingestion.result
+  format txt, 1 attempt(s), 0 retries
+2026-10-26T18:52:22.346206+00:00  normalizer  normalized
+  invoice number 'INV-1018' -> INV-1018
+  item 'WidgetA' -> WidgetA (exact)
+  item 'WidgetB' -> WidgetB (exact)
+  item 'GadgetX' -> GadgetX (exact)
+2026-10-26T18:52:27.167337+00:00  validation  validation.tool_calls
+  round 1 [grok/grok-4]: lookup_item, check_stock, reconcile_math, check_integrity, check_duplicate, check_payee_threshold, check_vendor, detect_prompt_injection, fraud_signals, check_prices
+2026-10-26T18:52:29.633793+00:00  validation  validation.summary
+  {"rounds": 1, "summary": "INV-1018 from Northwind Fabrication LLC passes every deterministic check (items known, stock OK, math reconciles to $9,750.00, vendor approved, due date valid, prices at reference). One INFO flag: NEAR_THRESHOLD on total.", "provider": "grok", "model": "grok-4"}
+2026-10-26T18:52:29.641607+00:00  validation  validation.findings
+    INFO NEAR_THRESHOLD: Total 9750.00 is just under the VP threshold  evidence={"total": "9750.00", "threshold": "10000.00"}
+2026-10-26T18:52:29.658684+00:00  approval  approval.policy
+  floor APPROVE; rules fired: AUTO_APPROVE_AT_OR_UNDER_THRESHOLD
+2026-10-26T18:52:34.578882+00:00  approval  approval.draft
+  AI VP draft round 0 [grok/grok-4]: APPROVE - Approved (AUTO_APPROVE_AT_OR_UNDER_THRESHOLD): Northwind Fabrication LLC INV-1018 for $9750.00 has no blocking findings and is within the auto-approval limit.
+2026-10-26T18:52:34.581689+00:00  approval  approval.decision
+  decision APPROVE by Auto (rules): Approved (AUTO_APPROVE_AT_OR_UNDER_THRESHOLD): Northwind Fabrication LLC INV-1018 for $9750.00 has no blocking findings and is within the auto-approval limit.
+2026-10-26T18:52:34.605255+00:00  disposition  payment.queued
+  full 9750.00 USD to Northwind Fabrication LLC (row 7)
+2026-10-26T18:52:34.607891+00:00  disposition  disposition.outcome
+  outcome APPROVE -> Queued for payment
+2026-10-26T18:52:46.421810+00:00  disposition  review.enqueued
+  held for review (payee_threshold): Payee cumulative threshold
+2026-10-26T18:52:54.696207+00:00  disposition  review.enqueued
+  held for review (payee_threshold): Payee cumulative threshold
