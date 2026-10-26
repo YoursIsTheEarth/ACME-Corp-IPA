@@ -8,11 +8,12 @@ from acme.approval import agent as approval_agent, run_approval
 from acme.approval.agent import AUTO
 from acme.models import Critique, Decision, InvoiceState, LineItem, Outcome
 from acme.validation import ValidationContext, run_validation
+from fake_llm import critic_review
 from fakes import ScriptedStructured
 from golden_invoices import GOLDEN, GOLDEN_FILES, record_processed
 
 R, N, A = Outcome.REJECT, Outcome.NEEDS_REVIEW, Outcome.APPROVE
-AI_VP = "AI VP (offline/rule-based)"
+AI_VP = "AI VP (grok/grok-4)"  # the fake stands in for the configured Grok model
 
 
 def big_clean_invoice(golden):
@@ -52,7 +53,7 @@ def test_critic_passes_first_draft(ctx, golden, monkeypatch):
     assert events(state) == [("approval.policy", None), ("approval.draft", 0), ("approval.critique", 0),
                              ("approval.decision", None)]
     critique = next(e for e in state.trace if e["event"] == "approval.critique")
-    assert (critique["provider"], critique["model"]) == ("offline", "rule-based")
+    assert (critique["provider"], critique["model"]) == ("grok", "grok-4")
 
 
 def test_critic_never_passes_needs_review(ctx, golden, monkeypatch):
@@ -122,9 +123,9 @@ def test_prompts_mark_invoice_untrusted(ctx, golden, monkeypatch):
         assert "<untrusted_invoice>" in messages[1].content and "<policy>" in messages[1].content
 
 
-# --- 5.3 / 5.4 offline -------------------------------------------------------------------
+# --- 5.3 / 5.4 fake model -------------------------------------------------------------------
 
-def test_offline_rationales_for_every_golden_invoice(seeded_db):
+def test_fake_rationales_for_every_golden_invoice(seeded_db):
     decisions = {}
     for name in GOLDEN_FILES:
         state = run_approval(validated(GOLDEN[name], ValidationContext.load(seeded_db), f"r-{name}"))
@@ -139,25 +140,24 @@ def test_offline_rationales_for_every_golden_invoice(seeded_db):
     assert len(decisions["invoice_1001.txt"].rationale.splitlines()) == 1
 
 
-def test_offline_vp_scrutiny_runs_the_critic(ctx, golden):
+def test_fake_vp_scrutiny_runs_the_critic(ctx, golden):
     state = run_approval(validated(big_clean_invoice(golden), ctx))
     assert events(state) == [("approval.policy", None), ("approval.draft", 0), ("approval.critique", 0),
                              ("approval.decision", None)]
     assert state.critique.passes and state.decision.outcome == A and state.decision.decided_by == AI_VP
 
 
-def test_offline_critic_rejects_draft_missing_a_rule(ctx, golden, monkeypatch):
-    # Approval LLM omits the rule; the offline critic flags it every round.
+def test_fake_critic_rejects_draft_missing_a_rule(ctx, golden, monkeypatch):
+    # Approval LLM omits the rule; the fake critic flags it every round.
     fake = ScriptedStructured({Decision: [draft(A, "Fine.")] * 3})
-    from acme.approval.offline import critic_review
     monkeypatch.setattr(approval_agent, "get_chat_model",
-                        lambda role: fake if role == "approval" else _OfflineCritic(critic_review))
+                        lambda role: fake if role == "approval" else _FakeCritic(critic_review))
     state = run_approval(validated(big_clean_invoice(golden), ctx))
     assert state.decision.outcome == N
     assert sum(e["event"] == "approval.critique" for e in state.trace) == 3
 
 
-class _OfflineCritic:
+class _FakeCritic:
     def __init__(self, handler):
         self.handler = handler
 
@@ -179,5 +179,5 @@ def test_approval_moves_no_money(seeded_db, golden, synthetic):
     assert state.decision.outcome == A and state.payment_result is None
     for table in ("payments", "payment_queue", "payment_batches"):
         assert seeded_db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0, table
-    for module in (approval_agent, acme.approval.policy, acme.approval.offline):
+    for module in (approval_agent, acme.approval.policy):
         assert "mock_payment" not in inspect.getsource(module)

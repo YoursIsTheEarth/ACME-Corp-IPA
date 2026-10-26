@@ -1,4 +1,4 @@
-"""Integration: ingest() then normalize() over all 20 sample files in offline mode (task 6.1)."""
+"""Integration: ingest() then normalize() over all 20 sample files with the test fake model (task 6.1)."""
 
 from pathlib import Path
 
@@ -30,7 +30,7 @@ def test_every_file_yields_an_invoice_or_extraction_failed(outcomes):
         assert isinstance(invoice, Invoice) or [f.code for f in findings] == [FindingCode.EXTRACTION_FAILED], name
 
 
-def test_all_sample_files_extract_offline(outcomes):
+def test_all_sample_files_extract_with_fake_model(outcomes):
     assert all(invoice is not None for invoice, _ in outcomes.values())
 
 

@@ -129,3 +129,22 @@ Rollback: revert the change commit. Nothing in the data or schema changes.
 ## Open Questions
 
 - Confirm the exact current Grok model name before submission. This is carried over from the foundation and unaffected here.
+
+## Implementation notes
+
+- **Fake model wiring.** `backend/tests/fake_llm.py` holds `FakeChatModel`, the handler and tool-plan registries, and the moved handlers (regex extraction, template approval/critic, call-every-check tool plan, null SKU/date suggestions) plus `address_verdict`, backed by a test-local landmark table. `install(monkeypatch)` replaces `acme.llm.factory._build_model` and resets the registries. The calls it makes are recorded in `llm_calls` with provider `fake`, model `fake-model`. Traces and `decided_by` still show the configured provider (`grok`/`grok-4`), because `active_models()` reports settings.
+  - Root `conftest.py` (autouse): sets `LLM_PROVIDER=grok` and `XAI_API_KEY=test-key`, then installs the fake. The `real_models` fixture restores the real builder for the tests that check the Grok and Claude classes. No calls are made in those tests.
+  - Session- and module-scoped fixtures (`test_golden.py`, `api/conftest.py::api_golden`) install the fake on their own `MonkeyPatch`.
+  - Two test-only entry points live under `backend/tests/` and install the same fake with a standalone `pytest.MonkeyPatch()`. Neither ships in `backend/src`, and no setting or flag reaches them. `LLM_PROVIDER=fake` and `LLM_PROVIDER=offline` are rejected like any invalid value.
+    - `fake_server.py: create_app()`: e2e. `frontend/e2e/start-backend.sh` runs `uvicorn fake_server:create_app --factory --app-dir backend/tests` with `XAI_API_KEY=test-key`.
+    - `fake_cli.py`: the subprocess CLI tests that need a fresh process, such as the README command and held-invoice-survives-restart.
+- **Address module import.** `acme/validation/address.py` imports `untrusted()` lazily from `acme.validation.agent`, because the agent imports the address module.
+- **Invalid-provider message.** It keeps the design's wording, which includes "offline mode was removed". That is the one `offline` hit in `backend/src` (task 2.2's grep).
+- **CLI.** `--provider` uses argparse `choices`, so an invalid value exits 2 via argparse ("choose from grok, claude"). An invalid `LLM_PROVIDER` setting now stops every CLI command, not only processing.
+- **Recovery.** Without a key, `recover()` and the CLI's `_recover` still reset orphaned runs to Uploaded but do not process them. A restart with a key processes them.
+- **Front end.** `upload.service.ts` needed no change. Its `errorMessage()` already shows `detail.message`, and a component test covers the 503.
+- **Network check.** The backend suite also passed with every HTTP(S) proxy pointed at a closed port.
+- **Real-model check (8.1).** No real API key was available in this environment, so the INV-1005 live run was not performed. The no-key paths were verified for real:
+  - `main.py` exits 2 with the message.
+  - The API returns 503 and `/api/stats` reports `configured: false`.
+  - `./run.sh` with empty keys starts both servers, prints the yellow warning, and the browser shows the banner and the disabled drop zone.

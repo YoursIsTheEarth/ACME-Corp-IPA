@@ -3,7 +3,7 @@ from decimal import Decimal
 
 import pytest
 
-from acme.models import FindingCode as C, Severity
+from acme.models import FindingCode as C, FindingSource, Severity
 from acme.normalization.fx import convert_currency
 from acme.settings import get_settings
 from acme.validation import ValidationContext, detect_duplicate, fraud_score
@@ -11,7 +11,7 @@ from acme.validation.checks import (
     check_duplicate, check_integrity, check_items, check_prices, check_stock, check_vendor, fraud_signals,
     reconcile_math,
 )
-from golden_invoices import GOLDEN, record_payment, record_processed
+from golden_invoices import GOLDEN, assessed, record_payment, record_processed
 
 
 def codes(findings):
@@ -258,12 +258,19 @@ def test_1014_variance_depends_on_rate(ctx, rate, flagged):
 # --- 6.3 / 6.4 fraud signals -------------------------------------------------------------
 
 def test_1005_suspicious_address(ctx, golden):
-    found = fraud_signals(golden["invoice_1005.json"], ctx)
+    invoice = golden["invoice_1005.json"]
+    found = fraud_signals(invoice, assessed(ctx, invoice))
     assert codes(found) == [C.SUSPICIOUS_ADDRESS] and found[0].severity == Severity.WARNING
+    assert found[0].source == FindingSource.LLM and set(found[0].evidence) == {"address", "reason", "confidence"}
+
+
+def test_1005_without_an_assessment_has_no_address_signal(ctx, golden):
+    assert fraud_signals(golden["invoice_1005.json"], ctx) == []
 
 
 def test_1004_fictional_address_not_flagged(ctx, golden):
-    assert fraud_signals(golden["invoice_1004.json"], ctx) == []
+    invoice = golden["invoice_1004.json"]
+    assert fraud_signals(invoice, assessed(ctx, invoice)) == []
 
 
 def test_1012_near_threshold(ctx, golden):
@@ -293,7 +300,7 @@ def test_1003_fraud_suspected(ctx, golden):
 @pytest.mark.parametrize("name,expected", [("invoice_1005.json", 0.30), ("invoice_1008.txt", 0.30),
                                            ("invoice_1012.pdf", 0.10)])
 def test_single_signals_stay_under_threshold(ctx, golden, name, expected):
-    assert fraud_score(golden[name], ctx)[0] == pytest.approx(expected)
+    assert fraud_score(golden[name], assessed(ctx, golden[name]))[0] == pytest.approx(expected)
 
 
 @pytest.mark.parametrize("name", ["invoice_1001.txt", "invoice_1004.json", "invoice_1004_revised.json",
@@ -305,4 +312,5 @@ def test_clean_invoices_score_zero(ctx, golden, name):
 def test_weights_and_threshold_come_from_settings(ctx, golden, monkeypatch):
     monkeypatch.setenv("FRAUD_THRESHOLD", "0.25")
     get_settings.cache_clear()
-    assert C.FRAUD_SUSPECTED in codes(fraud_signals(golden["invoice_1005.json"], ctx))
+    invoice = golden["invoice_1005.json"]
+    assert C.FRAUD_SUSPECTED in codes(fraud_signals(invoice, assessed(ctx, invoice)))

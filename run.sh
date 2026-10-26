@@ -2,7 +2,7 @@
 # Run the ACME Corp IPA backend (FastAPI, :8000; the frontend proxy expects this port) and frontend (Angular, :4200) together.
 # Installs dependencies and seeds acme.db on first run. Ctrl+C stops both.
 #
-#   ./run.sh                      # uses .env, or offline mode if no provider/key is configured
+#   ./run.sh                      # uses .env; set XAI_API_KEY (Grok) or ANTHROPIC_API_KEY (Claude) to process invoices
 #   LLM_PROVIDER=claude ./run.sh  # override the provider for this run
 #   HOST=0.0.0.0 ./run.sh         # listen on all interfaces (e.g. inside a container)
 set -euo pipefail
@@ -26,11 +26,16 @@ if [[ ! -d frontend/node_modules ]]; then
   make frontend-setup
 fi
 
-# Default to offline mode when no provider is configured anywhere and no API key is set
-if [[ -z "${LLM_PROVIDER:-}" ]] && ! grep -qs '^LLM_PROVIDER=' .env \
-   && [[ -z "${XAI_API_KEY:-}${ANTHROPIC_API_KEY:-}" ]]; then
-  echo "No LLM provider or API key configured; running in offline mode."
-  export LLM_PROVIDER=offline
+# LLM key status: without a key both servers still start (the web app shows a banner), but no invoice is processed
+status=0
+llm_status="$("$PY" -m acme.llm 2>&1)" || status=$?
+if (( status == 2 )); then
+  echo "$llm_status" >&2
+  exit 1
+elif (( status != 0 )); then
+  printf '\033[33m%s\033[0m\n' "$llm_status"
+else
+  echo "$llm_status"
 fi
 
 for port in 8000 "$WEB_PORT"; do

@@ -5,36 +5,26 @@ check it skipped runs anyway. `state.findings` becomes the de-duplicated union o
 findings (normalization), every deterministic check, and capped LLM judgment findings.
 """
 
+import dataclasses
 import json
 from pathlib import Path
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
-from acme.llm import active_models, get_chat_model, register_tool_plan
+from acme.llm import active_models, get_chat_model
 from acme.logging import agent_context, audit, dumps, run_context
 from acme.models import Finding, Invoice, InvoiceState
 from acme.settings import get_settings
 from acme.validation import checks
+from acme.validation.address import assess_address
 from acme.validation.context import ValidationContext
-from acme.validation.tools import REPORT_FINDING, ToolRun, build_tools, run_check
+from acme.validation.tools import ToolRun, build_tools, run_check
 
 AGENT = "validation"
 PROMPT_VERSION = "validation_v1"
 PROMPTS_DIR = Path(__file__).resolve().parents[3] / "prompts"
 START, END = "<untrusted_invoice>", "</untrusted_invoice>"
 _USER_SPLIT = "\n---- user ----\n"
-
-
-def offline_tool_plan(messages: list[BaseMessage], tool_names: list[str]) -> list[dict]:
-    """Offline (D8): call every check tool once, with no arguments, then stop."""
-    return [{"name": name, "args": {}} for name in tool_names if name != REPORT_FINDING]
-
-
-def register_offline() -> None:
-    register_tool_plan(offline_tool_plan)
-
-
-register_offline()
 
 
 def untrusted(text: str) -> str:
@@ -100,6 +90,7 @@ def run_validation(state: InvoiceState, ctx: ValidationContext | None = None) ->
     ctx = ctx or ValidationContext.load()
     run = ToolRun()
     with run_context(state.run_id), agent_context(AGENT):
+        ctx = dataclasses.replace(ctx, address_assessment=assess_address(invoice))
         _agent_loop(state, invoice, ctx, run)
         swept = [name for name in checks.CHECKS if name not in run.results]
         for name in swept:

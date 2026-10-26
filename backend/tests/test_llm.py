@@ -1,3 +1,6 @@
+import subprocess
+import sys
+
 import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -5,21 +8,20 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import tool
 
 from acme.llm import (
-    ProviderConfigError, RuleBasedLLM, active_models, check_keys, get_chat_model,
-    register_handler, register_tool_plan, use_provider,
+    KeyStatus, ProviderConfigError, active_models, get_chat_model, key_status, missing_key_message, require_llm,
+    use_provider,
 )
 from acme.llm import retry
 from acme.llm.callbacks import LLMCallRecorder
 from acme.logging import run_context
 from acme.models import Decision, Outcome
+from fake_llm import FakeChatModel, register_handler, register_tool_plan
 
 
 @pytest.fixture(autouse=True)
-def _offline_registries():
+def _template_decision():
     register_handler(Decision, lambda messages: Decision(
         outcome=Outcome.APPROVE, rationale=f"Template rationale for: {messages[-1].content}"))
-    yield
-    register_tool_plan(None)
 
 
 @tool
@@ -34,27 +36,27 @@ def check_vendor(name: str) -> str:
     return "approved"
 
 
-# --- RuleBasedLLM -----------------------------------------------------------
+# --- test-only fake model ------------------------------------------------------
 
-def test_offline_structured_output_is_deterministic(db):
-    model = RuleBasedLLM().with_structured_output(Decision)
+def test_fake_structured_output_is_deterministic(db):
+    model = FakeChatModel().with_structured_output(Decision)
     first = model.invoke([HumanMessage("INV-1001")])
     second = model.invoke([HumanMessage("INV-1001")])
     assert isinstance(first, Decision) and first == second
     assert first.rationale == "Template rationale for: INV-1001"
 
 
-def test_offline_missing_handler_raises():
+def test_fake_missing_handler_raises():
     class Unregistered(Decision):
         pass
     with pytest.raises(LookupError, match="Unregistered"):
-        RuleBasedLLM().with_structured_output(Unregistered).invoke("x")
+        FakeChatModel().with_structured_output(Unregistered).invoke("x")
 
 
-def test_offline_tool_plan_then_final_message():
+def test_fake_tool_plan_then_final_message():
     register_tool_plan(lambda messages, names: [{"name": n, "args": {"sku": "WidgetA"} if n == "check_stock"
                                                  else {"name": "Widgets Inc."}} for n in names])
-    model = RuleBasedLLM().bind_tools([check_stock, check_vendor])
+    model = FakeChatModel().bind_tools([check_stock, check_vendor])
     first = model.invoke([HumanMessage("validate")])
     assert [c["name"] for c in first.tool_calls] == ["check_stock", "check_vendor"]
     assert first.tool_calls[0]["args"] == {"sku": "WidgetA"}
@@ -65,16 +67,29 @@ def test_offline_tool_plan_then_final_message():
     assert final.tool_calls == [] and final.content
 
 
-def test_offline_default_tool_plan_calls_each_tool():
-    first = RuleBasedLLM().bind_tools([check_vendor]).invoke("validate")
+def test_fake_default_tool_plan_calls_each_tool():
+    first = FakeChatModel().bind_tools([check_vendor]).invoke("validate")
     assert [(c["name"], c["args"]) for c in first.tool_calls] == [("check_vendor", {})]
+
+
+def test_fake_is_installed_for_every_role():
+    assert all(isinstance(get_chat_model(r), FakeChatModel) for r in ("extraction", "validation", "approval", "critic"))
+
+
+def test_real_provider_classes_never_built(monkeypatch):
+    from acme.llm import providers
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("a real provider model was built during tests")
+    monkeypatch.setattr(providers.RetryingChatXAI, "__init__", refuse)
+    monkeypatch.setattr(providers.RetryingChatAnthropic, "__init__", refuse)
+    get_chat_model("extraction").with_structured_output(Decision).invoke([HumanMessage("x")])
 
 
 # --- factory ------------------------------------------------------------------
 
-def test_default_provider_is_grok(monkeypatch):
+def test_default_provider_is_grok(monkeypatch, real_models):
     monkeypatch.delenv("LLM_PROVIDER")
-    monkeypatch.setenv("XAI_API_KEY", "test-key")
     from langchain_xai import ChatXAI
     model = get_chat_model("extraction")
     assert isinstance(model, ChatXAI)
@@ -83,7 +98,7 @@ def test_default_provider_is_grok(monkeypatch):
     assert any(isinstance(cb, LLMCallRecorder) for cb in model.callbacks)
 
 
-def test_claude_provider(monkeypatch):
+def test_claude_provider(monkeypatch, real_models):
     monkeypatch.setenv("LLM_PROVIDER", "claude")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     from langchain_anthropic import ChatAnthropic
@@ -92,32 +107,61 @@ def test_claude_provider(monkeypatch):
     assert model.model == "claude-sonnet-5-5" and model.default_request_timeout == 30
 
 
-def test_run_override_wins(monkeypatch):
+def test_run_override_wins(monkeypatch, real_models):
     monkeypatch.setenv("LLM_PROVIDER", "grok")
-    with use_provider("offline"):
-        assert all(isinstance(get_chat_model(r), RuleBasedLLM)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "a")
+    from langchain_anthropic import ChatAnthropic
+    with use_provider("claude"):
+        assert all(isinstance(get_chat_model(r), ChatAnthropic)
                    for r in ("extraction", "validation", "approval", "critic"))
-        check_keys()  # offline needs no key
     assert active_models()["critic"]["provider"] == "grok"
 
 
-def test_invalid_provider(monkeypatch):
-    monkeypatch.setenv("LLM_PROVIDER", "gpt")
+@pytest.mark.parametrize("value", ["gpt", "offline", "fake"])
+def test_invalid_provider(monkeypatch, value):
+    monkeypatch.setenv("LLM_PROVIDER", value)
     with pytest.raises(ProviderConfigError) as err:
-        check_keys()
-    assert all(v in str(err.value) for v in ("grok", "claude", "offline"))
+        key_status()
+    assert "valid values are: grok, claude" in str(err.value)
     with pytest.raises(ProviderConfigError):
         get_chat_model("extraction")
 
 
+@pytest.mark.parametrize("value", ["offline", "fake"])
+def test_provider_override_rejects_removed_values(value):
+    with pytest.raises(ProviderConfigError, match="grok, claude"):
+        with use_provider(value):
+            pass
+
+
+def test_key_configured(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "claude")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "a")
+    assert key_status() == KeyStatus(configured=True, provider="claude", missing_key=None)
+    require_llm()
+
+
 def test_missing_grok_key(monkeypatch):
-    monkeypatch.setenv("LLM_PROVIDER", "grok")
+    monkeypatch.delenv("XAI_API_KEY")
+    assert key_status() == KeyStatus(configured=False, provider="grok", missing_key="XAI_API_KEY")
     with pytest.raises(ProviderConfigError, match="XAI_API_KEY"):
-        check_keys()
+        require_llm()
+    with pytest.raises(ProviderConfigError, match="No LLM token provided"):
+        get_chat_model("extraction")
 
 
-def test_offline_needs_no_keys():
-    check_keys()
+def test_missing_claude_key(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "claude")
+    assert key_status() == KeyStatus(configured=False, provider="claude", missing_key="ANTHROPIC_API_KEY")
+    with use_provider("grok"):
+        assert key_status().configured  # the run override needs only the Grok key
+
+
+def test_missing_key_message_text():
+    assert missing_key_message("XAI_API_KEY", "grok") == (
+        "No LLM token provided: set XAI_API_KEY for Grok (in .env or the environment). "
+        "The app cannot process invoices without it.")
+    assert "set ANTHROPIC_API_KEY for Claude" in missing_key_message("ANTHROPIC_API_KEY", "claude")
 
 
 def test_active_models_claude(monkeypatch):
@@ -128,7 +172,7 @@ def test_active_models_claude(monkeypatch):
     assert all(m == {"provider": "claude", "model": "claude-opus-5-5"} for m in models.values())
 
 
-def test_critic_override_only_affects_critic(monkeypatch):
+def test_critic_override_only_affects_critic(monkeypatch, real_models):
     monkeypatch.setenv("LLM_PROVIDER", "grok")
     monkeypatch.setenv("LLM_PROVIDER_CRITIC", "claude")
     monkeypatch.setenv("XAI_API_KEY", "x")
@@ -146,18 +190,34 @@ def test_critic_override_key_checked(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "grok")
     monkeypatch.setenv("XAI_API_KEY", "x")
     monkeypatch.setenv("LLM_PROVIDER_CRITIC", "claude")
+    assert key_status() == KeyStatus(configured=False, provider="claude", missing_key="ANTHROPIC_API_KEY")
     with pytest.raises(ProviderConfigError, match="ANTHROPIC_API_KEY"):
-        check_keys()
+        require_llm()
+
+
+def _status_cli(**env):
+    import os
+    clean = {k: v for k, v in os.environ.items() if not k.endswith("_API_KEY") and not k.startswith("LLM_")}
+    return subprocess.run([sys.executable, "-m", "acme.llm"], capture_output=True, text=True, env={**clean, **env})
+
+
+def test_status_printer(tmp_path):
+    missing = _status_cli()
+    assert missing.returncode == 1 and "No LLM token provided: set XAI_API_KEY for Grok" in missing.stdout
+    ok = _status_cli(LLM_PROVIDER="claude", ANTHROPIC_API_KEY="a")
+    assert ok.returncode == 0 and "claude" in ok.stdout
+    bad = _status_cli(LLM_PROVIDER="offline")
+    assert bad.returncode == 2 and "grok, claude" in bad.stderr
 
 
 # --- call recording and retries ------------------------------------------------
 
-def test_offline_call_recorded(db):
+def test_fake_call_recorded(db):
     model = get_chat_model("approval").with_structured_output(Decision)
     with run_context("r-123"):
         model.invoke([HumanMessage("INV-1001")], config={"metadata": {"prompt_version": "approval.v1"}})
     row = db.execute("SELECT * FROM llm_calls").fetchone()
-    assert (row["run_id"], row["agent"], row["provider"], row["model"]) == ("r-123", "approval", "offline", "rule-based")
+    assert (row["run_id"], row["agent"], row["provider"], row["model"]) == ("r-123", "approval", "fake", "fake-model")
     assert (row["prompt_version"], row["tokens_in"], row["tokens_out"], row["retries"], row["failed"]) == \
         ("approval.v1", 0, 0, 0, 0)
 

@@ -14,7 +14,6 @@ from pathlib import Path
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
-from acme.approval import offline
 from acme.approval.policy import STRICTNESS, PolicyResult, apply_policy, stricter
 from acme.llm import active_models, get_chat_model
 from acme.logging import agent_context, audit, dumps, run_context
@@ -27,8 +26,6 @@ APPROVAL_PROMPT, CRITIC_PROMPT = "approval_v1", "critic_v1"
 PROMPTS_DIR = Path(__file__).resolve().parents[3] / "prompts"
 _USER_SPLIT = "\n---- user ----\n"
 AUTO = "Auto (rules)"
-
-offline.register_offline()
 
 
 def block(name: str, value) -> str:

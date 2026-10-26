@@ -43,7 +43,6 @@ class Settings(BaseSettings):
     # Validation
     price_variance_pct: Decimal = Decimal("10")
     near_threshold_floor_usd: Decimal = Decimal("9500.00")
-    suspicious_addresses: list[str] = ["1600 Pennsylvania Ave"]
     fraud_signal_weights: dict[str, float] = {
         "urgency_language": 0.25,
         "wire_transfer": 0.25,

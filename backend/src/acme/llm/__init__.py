@@ -1,27 +1,29 @@
-"""LLM access: `get_chat_model(role)` plus the offline `RuleBasedLLM` registries."""
+"""LLM access: `get_chat_model(role)` and the API key status that gates invoice processing."""
 
 from acme.llm.factory import (
     PROVIDERS,
     ROLES,
+    KeyStatus,
     ProviderConfigError,
     active_models,
-    check_keys,
     get_chat_model,
+    key_status,
+    missing_key_message,
+    require_llm,
     resolve_provider,
     use_provider,
 )
-from acme.llm.offline import RuleBasedLLM, register_handler, register_tool_plan
 
 __all__ = [
     "PROVIDERS",
     "ROLES",
+    "KeyStatus",
     "ProviderConfigError",
-    "RuleBasedLLM",
     "active_models",
-    "check_keys",
     "get_chat_model",
-    "register_handler",
-    "register_tool_plan",
+    "key_status",
+    "missing_key_message",
+    "require_llm",
     "resolve_provider",
     "use_provider",
 ]

@@ -4,16 +4,17 @@ import pytest
 
 from acme.models import Severity
 from acme.validation import ValidationContext, run_checks
-from golden_invoices import EXPECTED_OUTCOME, GOLDEN, GOLDEN_FILES, KEY_CODES, record_processed
+from golden_invoices import EXPECTED_OUTCOME, GOLDEN, GOLDEN_FILES, KEY_CODES, assessed, record_processed
 
 
 @pytest.fixture
 def golden_findings(seeded_db):
-    """Each file validated against the processed_invoices rows of the files before it."""
+    """Each file validated against the processed_invoices rows of the files before it, with the fake
+    model's address verdict (the deterministic checks read it; they never call the LLM)."""
     results = {}
     for name in GOLDEN_FILES:
         invoice = GOLDEN[name]
-        results[name] = run_checks(invoice, ValidationContext.load(seeded_db))
+        results[name] = run_checks(invoice, assessed(ValidationContext.load(seeded_db), invoice))
         record_processed(seeded_db, invoice, EXPECTED_OUTCOME[name], f"r-{name}")
     return results
 

@@ -85,4 +85,22 @@ describe('UploadService', () => {
     expect(summary).toEqual({ accepted: 2, total: 7 });
     expect(refreshed).toContain('queue');
   });
+
+  it('shows the API message when uploads are refused for a missing LLM key (503)', () => {
+    let summary: { accepted: number; total: number } | undefined;
+    service.add([file('a.txt', 10)]).subscribe((s) => (summary = s));
+    const message =
+      'No LLM token provided: set XAI_API_KEY for Grok (in .env or the environment). The app cannot process invoices without it.';
+    http
+      .expectOne('/api/invoices')
+      .flush(
+        { detail: { code: 'llm_not_configured', message, missing_key: 'XAI_API_KEY' } },
+        { status: 503, statusText: 'Service Unavailable' },
+      );
+    const [item] = service.items();
+    expect(item.state).toBe('error');
+    expect(item.error).toBe(message);
+    expect(summary).toEqual({ accepted: 0, total: 1 });
+    expect(refreshed).toEqual([]);
+  });
 });

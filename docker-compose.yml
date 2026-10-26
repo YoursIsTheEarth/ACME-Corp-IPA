@@ -1,5 +1,6 @@
 # Optional (F33): `docker compose up` runs the backend and the Angular dev server.
-# Open http://localhost:4200. Settings come from .env when present; LLM_PROVIDER defaults to offline here.
+# Open http://localhost:4200. Settings come from .env when present; set XAI_API_KEY (Grok, the default)
+# or ANTHROPIC_API_KEY with LLM_PROVIDER=claude there or in your shell to process invoices.
 services:
   backend:
     image: python:3.14-slim
@@ -11,7 +12,9 @@ services:
       - path: .env
         required: false
     environment:
-      LLM_PROVIDER: ${LLM_PROVIDER:-offline}
+      LLM_PROVIDER: ${LLM_PROVIDER:-grok}
+      XAI_API_KEY: ${XAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       DB_PATH: /data/acme.db
       UPLOAD_DIR: /data/uploads
     command: >

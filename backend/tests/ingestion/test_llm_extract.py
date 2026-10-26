@@ -5,12 +5,11 @@ from pathlib import Path
 import pytest
 
 from acme.ingestion import ExtractedInvoice, ingest
-from acme.ingestion.offline import _offline_extraction
-from acme.llm import register_handler
 from acme.logging import read_trace
 from acme.models import FindingCode, Severity
 from acme.normalization import normalize
 from acme.normalization.cleaners import fix_ocr, parse_money
+from fake_llm import register_handler
 
 INVOICES = Path(__file__).resolve().parents[3] / "data" / "invoices"
 
@@ -50,7 +49,7 @@ CASES = [
 
 
 @pytest.mark.parametrize("name, fmt, number, vendor, lines, subtotal, total", CASES, ids=[c[0] for c in CASES])
-def test_offline_extraction(db, name, fmt, number, vendor, lines, subtotal, total):
+def test_fake_model_extraction(db, name, fmt, number, vendor, lines, subtotal, total):
     result = ingest(INVOICES / name, run_id="r-1")
     assert result.findings == [] and result.attempts == 1  # line sum passes first time
     assert result.source_format == fmt
@@ -61,7 +60,7 @@ def test_offline_extraction(db, name, fmt, number, vendor, lines, subtotal, tota
     assert money(inv.subtotal) == (Decimal(subtotal) if subtotal else None)
     assert money(inv.total) == Decimal(total)
     [call] = db.execute("SELECT agent, provider, prompt_version FROM llm_calls").fetchall()
-    assert tuple(call) == ("ingestion", "offline", "extraction.v2")
+    assert tuple(call) == ("ingestion", "fake", "extraction.v2")
 
 
 def test_1010_tax_shipping_and_dates(db):
@@ -107,7 +106,7 @@ DROPPED_LINE = {**VALID, "line_items": [*VALID["line_items"][:2], *VALID["line_i
 
 @pytest.fixture
 def stub_model():
-    """Replace the offline extraction handler with a scripted sequence of answers."""
+    """Replace the fake extraction handler with a scripted sequence of answers (reset after each test)."""
     prompts: list[str] = []
 
     def install(*answers):
@@ -119,8 +118,7 @@ def stub_model():
         register_handler(ExtractedInvoice, handler)
         return prompts
 
-    yield install
-    register_handler(ExtractedInvoice, _offline_extraction)
+    return install
 
 
 @pytest.fixture

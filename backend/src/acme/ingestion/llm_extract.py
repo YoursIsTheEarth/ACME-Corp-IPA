@@ -35,7 +35,7 @@ def render_prompt(text: str, error: str | None = None) -> list[BaseMessage]:
 
 
 def invoice_text_from(messages: list[BaseMessage]) -> str:
-    """The invoice text inside the markers of the last user message (used by offline handlers)."""
+    """The invoice text inside the markers of the last user message (used by the test fake model)."""
     content = str(messages[-1].content)
     start, end = content.rfind(START_MARKER), content.rfind(END_MARKER)
     if start == -1 or end < start:

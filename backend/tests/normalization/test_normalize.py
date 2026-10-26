@@ -5,11 +5,11 @@ from pathlib import Path
 import pytest
 
 from acme.ingestion import ExtractedInvoice, ingest
-from acme.llm import register_handler
 from acme.logging import read_trace
 from acme.models import FindingCode, Invoice
 from acme.normalization import normalize
 from acme.normalization.llm_fallback import DateSuggestion, SkuSuggestion
+from fake_llm import register_handler
 
 INVOICES = Path(__file__).resolve().parents[3] / "data" / "invoices"
 
@@ -29,8 +29,7 @@ def fallback_handlers():
     def install(sku=None, when=None):
         register_handler(SkuSuggestion, lambda messages: SkuSuggestion(sku=sku))
         register_handler(DateSuggestion, lambda messages: DateSuggestion(date=when))
-    yield install
-    install()  # back to the offline "no suggestion" handlers
+    return install  # the root conftest restores the fake's "no suggestion" handlers
 
 
 def test_1012_ocr_repairs_and_aliases(seeded_db):

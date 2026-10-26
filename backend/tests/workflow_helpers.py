@@ -4,25 +4,10 @@ import json
 from decimal import Decimal
 from pathlib import Path
 
-from acme.approval.offline import register_offline as register_approval_offline
-from acme.ingestion.offline import _offline_extraction
-from acme.ingestion.schema import ExtractedInvoice
-from acme.llm import register_handler
 from acme.logging import read_trace
-from acme.normalization.llm_fallback import DateSuggestion, SkuSuggestion
-from acme.validation.agent import register_offline as register_validation_offline
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INVOICES = REPO_ROOT / "data" / "invoices"
-
-
-def restore_offline() -> None:
-    """Other suites replace the global offline handlers and tool plan; restore the defaults."""
-    register_validation_offline()
-    register_approval_offline()
-    register_handler(ExtractedInvoice, _offline_extraction)
-    register_handler(SkuSuggestion, lambda messages: SkuSuggestion())
-    register_handler(DateSuggestion, lambda messages: DateSuggestion())
 
 
 def events(run_id: str) -> list[str]:

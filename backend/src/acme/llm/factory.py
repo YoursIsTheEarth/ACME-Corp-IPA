@@ -8,29 +8,38 @@ and `with_structured_output` of what `get_chat_model(role)` returns.
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import dataclass
 
 from langchain_core.language_models import BaseChatModel
 
 from acme.llm.callbacks import LLMCallRecorder
-from acme.llm.offline import MODEL_NAME as OFFLINE_MODEL, RuleBasedLLM
 from acme.settings import Settings, get_settings
 
 ROLES = ("extraction", "validation", "approval", "critic")
-PROVIDERS = ("grok", "claude", "offline")
+PROVIDERS = ("grok", "claude")
 KEY_SETTINGS = {"grok": "XAI_API_KEY", "claude": "ANTHROPIC_API_KEY"}
+PROVIDER_LABELS = {"grok": "Grok", "claude": "Claude"}
 
 _provider_override: ContextVar[str | None] = ContextVar("acme_provider_override", default=None)
 
 
 class ProviderConfigError(RuntimeError):
-    """Invalid provider selection or a missing API key; stops startup."""
+    """Invalid provider selection, or a missing API key where an LLM is needed."""
+
+
+@dataclass(frozen=True)
+class KeyStatus:
+    configured: bool
+    provider: str
+    missing_key: str | None
 
 
 def _validate(provider: str, source: str) -> str:
     value = provider.strip().lower()
     if value not in PROVIDERS:
         raise ProviderConfigError(
-            f"Invalid LLM provider {provider!r} from {source}; valid values are: {', '.join(PROVIDERS)}"
+            f"Invalid LLM provider {provider!r} from {source}; valid values are: {', '.join(PROVIDERS)} "
+            "(offline mode was removed; set XAI_API_KEY or ANTHROPIC_API_KEY)"
         )
     return value
 
@@ -58,18 +67,10 @@ def resolve_provider(role: str, settings: Settings | None = None) -> str:
 
 
 def _model_name(provider: str, settings: Settings) -> str:
-    return {"grok": settings.grok_model, "claude": settings.claude_model, "offline": OFFLINE_MODEL}[provider]
+    return {"grok": settings.grok_model, "claude": settings.claude_model}[provider]
 
 
-def get_chat_model(role: str) -> BaseChatModel:
-    """Return the configured chat model for `role`, with timeout, retries, and call recording."""
-    settings = get_settings()
-    provider = resolve_provider(role, settings)
-    model = _model_name(provider, settings)
-    callbacks = [LLMCallRecorder(provider, model, role)]
-    if provider == "offline":
-        return RuleBasedLLM(callbacks=callbacks)
-
+def _build_model(provider: str, model: str, settings: Settings, callbacks: list) -> BaseChatModel:
     from acme.llm.providers import RetryingChatAnthropic, RetryingChatXAI
 
     common = dict(
@@ -86,6 +87,15 @@ def get_chat_model(role: str) -> BaseChatModel:
     return RetryingChatAnthropic(api_key=settings.anthropic_api_key, **common)
 
 
+def get_chat_model(role: str) -> BaseChatModel:
+    """Return the configured chat model for `role`, with timeout, retries, and call recording."""
+    require_llm()
+    settings = get_settings()
+    provider = resolve_provider(role, settings)
+    model = _model_name(provider, settings)
+    return _build_model(provider, model, settings, [LLMCallRecorder(provider, model, role)])
+
+
 def active_models() -> dict[str, dict[str, str]]:
     """Provider and model name per role, e.g. {"critic": {"provider": "claude", "model": "..."}}."""
     settings = get_settings()
@@ -96,14 +106,24 @@ def active_models() -> dict[str, dict[str, str]]:
     return result
 
 
-def check_keys() -> None:
-    """Raise ProviderConfigError if any provider in use is invalid or lacks its API key."""
+def missing_key_message(env_name: str, provider: str) -> str:
+    return (f"No LLM token provided: set {env_name} for {PROVIDER_LABELS[provider]} (in .env or the environment). "
+            "The app cannot process invoices without it.")
+
+
+def key_status() -> KeyStatus:
+    """Whether every provider in use (per-role overrides included) has its API key; the first missing one."""
     settings = get_settings()
-    in_use = {resolve_provider(role, settings) for role in ROLES}
-    for provider in PROVIDERS:
-        env_name = KEY_SETTINGS.get(provider)
-        if provider in in_use and env_name and not getattr(settings, env_name.lower()):
-            raise ProviderConfigError(
-                f"{env_name} is required when the {provider!r} provider is in use "
-                f"(set it in .env, or use LLM_PROVIDER=offline)"
-            )
+    for role in ROLES:
+        provider = resolve_provider(role, settings)
+        env_name = KEY_SETTINGS[provider]
+        if not getattr(settings, env_name.lower()):
+            return KeyStatus(False, provider, env_name)
+    return KeyStatus(True, resolve_provider("approval", settings), None)
+
+
+def require_llm() -> None:
+    """Raise ProviderConfigError (the standard no-token message) unless every needed key is set."""
+    status = key_status()
+    if not status.configured:
+        raise ProviderConfigError(missing_key_message(status.missing_key, status.provider))

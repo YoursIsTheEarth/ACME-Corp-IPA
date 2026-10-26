@@ -22,7 +22,7 @@ from acme.api.scheduler import BatchRunner, PaymentScheduler
 from acme.api.worker import Worker
 from acme.db import connect, init_schema
 from acme.db.seed import seed
-from acme.llm import check_keys
+from acme.llm import key_status, missing_key_message
 from acme.settings import get_settings
 
 log = logging.getLogger(__name__)
@@ -53,15 +53,18 @@ def recover(worker: Worker) -> dict[str, Any]:
     """Restart durability (F28): settle `paying` rows, re-submit claimed reviews, re-enqueue orphaned runs.
 
     Runs Awaiting review need nothing: their checkpoint is on disk and the review endpoint resumes it.
+    Without an LLM key, orphaned runs are reset to Uploaded but wait for a restart with a key.
     """
     batch = payments.recover_interrupted_batch()
     resuming = _resuming_runs()
     for run_id in resuming:
         worker.submit("review", run_id)
     orphaned = workflow.recover_orphaned_runs()
-    for run_id in orphaned:
-        worker.submit("process", run_id)
-    summary = {"batch": batch, "resuming": resuming, "orphaned": orphaned}
+    llm_configured = key_status().configured
+    if llm_configured:
+        for run_id in orphaned:
+            worker.submit("process", run_id)
+    summary = {"batch": batch, "resuming": resuming, "orphaned": orphaned, "llm_configured": llm_configured}
     log.info("api_recovered", extra={"data": summary})
     return summary
 
@@ -83,7 +86,10 @@ def create_app(enable_scheduler: bool = True) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        check_keys()
+        status = key_status()  # an invalid provider stops startup; a missing key only blocks processing
+        if not status.configured:
+            log.warning("llm_not_configured", extra={"data": {
+                "missing_key": status.missing_key, "message": missing_key_message(status.missing_key, status.provider)}})
         await asyncio.to_thread(_ensure_db)
         bus = EventBus()
         bus.bind(asyncio.get_running_loop())

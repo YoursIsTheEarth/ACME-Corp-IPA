@@ -1,16 +1,7 @@
 import pytest
 
-from acme.approval.offline import register_offline as register_approval_offline
 from acme.validation import ValidationContext
-from acme.validation.agent import register_offline as register_validation_offline
 from golden_invoices import GOLDEN
-
-
-@pytest.fixture(autouse=True)
-def _offline_behaviors():
-    """Other suites replace the global offline handlers/tool plan; restore this change's."""
-    register_validation_offline()
-    register_approval_offline()
 
 
 @pytest.fixture

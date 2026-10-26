@@ -8,7 +8,8 @@ test('upload 3, approve INV-1010, pay all, see them in Payments', async ({ page 
   // Home: upload three files through the picker.
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Welcome to ACME Corp IPA' })).toBeVisible();
-  await expect(page.getByTestId('llm-provider')).toHaveText('Offline');
+  await expect(page.getByTestId('llm-provider')).toHaveText('Grok'); // the test-only fake stands in for Grok
+  await expect(page.getByTestId('llm-banner')).toHaveCount(0);
   await page.getByTestId('file-input').setInputFiles(files);
   await expect(page.getByTestId('upload-status').filter({ hasText: 'Queued' })).toHaveCount(3);
   await expect(page.getByText('3 files were accepted')).toBeVisible();

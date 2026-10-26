@@ -45,4 +45,29 @@ describe('DropZoneComponent', () => {
     (fixture.nativeElement.querySelector('[data-testid=browse]') as HTMLButtonElement).click();
     expect(click).toHaveBeenCalled();
   });
+
+  it('accepts nothing and explains why while disabled', () => {
+    const fixture = TestBed.createComponent(DropZoneComponent);
+    const emitted: File[][] = [];
+    fixture.componentInstance.files.subscribe((f) => emitted.push(f));
+    const reason = 'No LLM token provided — the app cannot process invoices without it. Set XAI_API_KEY in .env and restart the backend.';
+    fixture.componentRef.setInput('disabledReason', reason);
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    const zone = el.querySelector('[data-testid=drop-zone]') as HTMLElement;
+    expect(zone.classList).toContain('disabled');
+    expect(el.querySelector('[data-testid=drop-zone-disabled]')!.textContent).toContain(reason);
+    expect((el.querySelector('[data-testid=browse]') as HTMLButtonElement).disabled).toBeTrue();
+
+    zone.dispatchEvent(drag('dragover'));
+    fixture.detectChanges();
+    expect(zone.classList).not.toContain('hover');
+    zone.dispatchEvent(drag('drop', [new File(['a'], 'a.txt')]));
+    expect(emitted).toEqual([]);
+
+    fixture.componentRef.setInput('disabledReason', null);
+    fixture.detectChanges();
+    expect(zone.classList).not.toContain('disabled');
+    expect((el.querySelector('[data-testid=browse]') as HTMLButtonElement).disabled).toBeFalse();
+  });
 });

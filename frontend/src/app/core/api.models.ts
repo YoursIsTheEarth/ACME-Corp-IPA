@@ -274,7 +274,8 @@ export interface Stats {
   dollars_paid?: Money;
   dollars_blocked?: Money;
   duplicates_caught?: number;
-  llm: LlmModel & { roles?: Record<string, LlmModel> };
+  /** `configured` is false while the API key for a provider in use is missing (`missing_key` names it). */
+  llm: LlmModel & { roles?: Record<string, LlmModel>; configured: boolean; missing_key: string | null };
   server_time: string;
 }
 

@@ -4,10 +4,12 @@ Lets validation and approval tests run without extraction or an LLM. `GOLDEN_FIL
 sorted filename order the golden batch uses.
 """
 
+import dataclasses
 from datetime import date
 from decimal import Decimal
 
 from acme.models import Invoice, LineItem
+from acme.validation.address import assess_address
 
 D = Decimal
 
@@ -169,3 +171,8 @@ def record_payment(conn, invoice: Invoice, amount=None) -> None:
     conn.execute("INSERT INTO payments (idempotency_key, vendor, amount_usd, paid_at) VALUES (?, ?, ?, ?)",
                  (key, invoice.vendor_name, amount if amount is not None else invoice.total, "2026-01-31"))
     conn.commit()
+
+
+def assessed(ctx, invoice: Invoice):
+    """`ctx` with the (fake) model's address verdict for `invoice`, as `run_validation` builds it."""
+    return dataclasses.replace(ctx, address_assessment=assess_address(invoice))

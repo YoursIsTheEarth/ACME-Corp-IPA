@@ -23,7 +23,7 @@
     </a>
   </section>
 
-  <app-drop-zone (files)="onFiles($event)" />
+  <app-drop-zone (files)="onFiles($event)" [disabledReason]="uploadsOff()" />
 
   @if (items().length) {
     <section class="uploads" data-testid="upload-list">

@@ -26,6 +26,7 @@ seed:
 	$(PY) -m acme.db seed
 
 dev:
+	@$(PY) -m acme.llm || [ $$? -eq 1 ]  # warns without an LLM key (servers still start); stops on an invalid provider
 	@echo "Backend  http://localhost:8000/docs"
 	@echo "Web app  http://localhost:4200  (Ctrl+C stops both)"
 	@trap 'kill 0' INT TERM EXIT; \

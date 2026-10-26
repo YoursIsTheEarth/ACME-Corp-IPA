@@ -116,9 +116,9 @@ def test_payment_failure_hold_resumes_through_executor(wdb):
 def test_held_invoice_survives_restart(wdb, tmp_path):
     env = {k: v for k, v in os.environ.items() if not k.endswith("_API_KEY") and not k.startswith("LLM_")}
     proc = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "main.py"), f"--invoice_path={INVOICES / 'invoice_1010.txt'}",
-         "--provider", "offline", "--json"],
-        cwd=tmp_path, capture_output=True, text=True, env={**env, "LLM_PROVIDER": "offline"}, check=True)
+        [sys.executable, str(REPO_ROOT / "backend" / "tests" / "fake_cli.py"),
+         f"--invoice_path={INVOICES / 'invoice_1010.txt'}", "--json"],
+        cwd=tmp_path, capture_output=True, text=True, env={**env, "XAI_API_KEY": "test-key"}, check=True)
     run_id = json.loads(proc.stdout.splitlines()[0])["run_id"]
 
     state = run_state(run_id)  # fresh connection and graph in this process

@@ -70,7 +70,7 @@ The CSV parser SHALL read a tabular layout with one row per line item, ignore bl
 - **THEN** the result has 3 line items, subtotal 14750.00, tax 885.00, and total 15525.00, and the footer rows are not treated as line items
 
 ### Requirement: LLM extraction for unstructured formats (F3)
-TXT, PDF, and email files SHALL be extracted into the `Invoice` schema by the configured LLM using structured output. Extraction SHALL behave the same with the `grok`, `claude`, and `offline` providers. Line items SHALL keep their raw item name, and any qualifier text (such as "rush order") SHALL go into the line-item note.
+TXT, PDF, and email files SHALL be extracted into the `Invoice` schema by the configured LLM using structured output. Extraction SHALL behave the same with the `grok` and `claude` providers. Line items SHALL keep their raw item name, and any qualifier text (such as "rush order") SHALL go into the line-item note.
 
 #### Scenario: Typo-laden text invoice
 - **WHEN** `invoice_1002.txt` ("Vndr:", "Itms:", "Amt:") is extracted
@@ -85,8 +85,8 @@ TXT, PDF, and email files SHALL be extracted into the `Invoice` schema by the co
 - **THEN** there are 4 line items, the last with raw name WidgetA, quantity 4, unit price 300.00, and note "rush order"; subtotal 6700.00, tax 335.00, shipping 150.00, and total 7185.00
 
 #### Scenario: Same result across providers
-- **WHEN** `invoice_1001.txt` is extracted once with each of `grok`, `claude`, and `offline`
-- **THEN** all three produce the same invoice number, vendor, line items, and totals
+- **WHEN** `invoice_1001.txt` is extracted once with `grok` and once with `claude`
+- **THEN** both produce the same invoice number, vendor, line items, and totals
 
 ### Requirement: Invoice text is untrusted data (F3)
 Invoice text sent to the LLM SHALL be enclosed in delimiters and labeled as untrusted data. Instructions inside invoice text SHALL NOT change extraction behavior. They SHALL be kept as field content, such as `notes`.

@@ -1,7 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
-// The e2e run starts its own backend (offline provider, freshly seeded DB in e2e/.tmp, idle auto-pay off)
-// on port 8100 and its own `ng serve` on 4300 proxied to it, so it never touches your dev data.
+// The e2e run starts its own backend (test-only fake model via backend/tests/fake_server.py, dummy key,
+// freshly seeded DB in e2e/.tmp, idle auto-pay off) on port 8100 and its own `ng serve` on 4300 proxied
+// to it, so it never touches your dev data or calls a real LLM.
 const BACKEND_PORT = 8100;
 const FRONTEND_PORT = 4300;
 

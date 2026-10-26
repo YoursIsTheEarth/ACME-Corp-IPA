@@ -1,4 +1,4 @@
-"""API test fixtures: an httpx-backed TestClient on a temp `acme.db`, offline, scheduler off by default."""
+"""API test fixtures: an httpx-backed TestClient on a temp `acme.db`, fake model, scheduler off by default."""
 
 from collections.abc import Iterator
 
@@ -8,8 +8,8 @@ from fastapi.testclient import TestClient
 from acme.db import connect
 from acme.payments import mock_bank
 from acme.settings import get_settings
+import fake_llm
 from api_helpers import INVOICES, open_client, pay, upload
-from workflow_helpers import restore_offline
 
 
 @pytest.fixture(autouse=True)
@@ -18,7 +18,6 @@ def _api_env(tmp_path, monkeypatch):
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
     monkeypatch.setenv("PAYMENT_AUTO_IDLE", "false")
     get_settings.cache_clear()
-    restore_offline()
     mock_bank.reset()
     yield
     mock_bank.reset()
@@ -58,11 +57,11 @@ def api_golden(tmp_path_factory):
     workdir = tmp_path_factory.mktemp("api_golden")
     with pytest.MonkeyPatch.context() as mp:
         mp.chdir(workdir)
-        for name, value in (("LLM_PROVIDER", "offline"), ("DB_PATH", str(workdir / "acme.db")),
+        for name, value in (("LLM_PROVIDER", "grok"), ("XAI_API_KEY", "test-key"), ("DB_PATH", str(workdir / "acme.db")),
                             ("UPLOAD_DIR", str(workdir / "uploads")), ("PAYMENT_AUTO_IDLE", "false")):
             mp.setenv(name, value)
         get_settings.cache_clear()
-        restore_offline()
+        fake_llm.install(mp)
         mock_bank.reset()
         try:
             with open_client() as client:

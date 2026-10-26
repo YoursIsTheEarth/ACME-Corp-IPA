@@ -156,10 +156,11 @@ def test_stats_reports_configured_model(monkeypatch):
     get_settings.cache_clear()
     with open_client() as client:
         llm = client.get("/api/stats").json()["llm"]
-    assert (llm["provider"], llm["model"]) == ("claude", "claude-sonnet-5-5")
+    assert (llm["provider"], llm["model"], llm["configured"], llm["missing_key"]) == (
+        "claude", "claude-sonnet-5-5", True, None)
     assert llm["roles"]["critic"] == {"provider": "claude", "model": "claude-sonnet-5-5"}
 
 
-def test_stats_reports_offline_model(client):
+def test_stats_reports_default_model_and_key(client):
     llm = client.get("/api/stats").json()["llm"]
-    assert llm["provider"] == "offline" and llm["model"]
+    assert (llm["provider"], llm["model"], llm["configured"], llm["missing_key"]) == ("grok", "grok-4", True, None)

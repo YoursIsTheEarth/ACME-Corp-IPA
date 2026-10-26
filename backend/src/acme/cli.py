@@ -1,7 +1,7 @@
 """Command-line entry point (`python main.py ...`, F18, F19).
 
-    python main.py --invoice_path=data/invoices/invoice_1001.txt [--provider offline] [--json] [--pay]
-    python main.py --batch data/invoices [--provider offline] [--pay] [--released-by NAME] [--json]
+    python main.py --invoice_path=data/invoices/invoice_1001.txt [--provider grok|claude] [--json] [--pay]
+    python main.py --batch data/invoices [--provider grok|claude] [--pay] [--released-by NAME] [--json]
     python main.py --explain <run_id>
     python main.py payments run [--released-by NAME] [--json]
     python main.py review [<run_id> --decision approve|reject --reviewer NAME --rationale TEXT] [--json]
@@ -26,7 +26,7 @@ from rich.text import Text
 
 from acme.db import connect, init_schema
 from acme.db.seed import seed
-from acme.llm import ProviderConfigError, check_keys, use_provider
+from acme.llm import ProviderConfigError, key_status, missing_key_message, use_provider
 from acme.logging import configure_logging, dumps, read_trace
 
 log = logging.getLogger(__name__)
@@ -38,7 +38,8 @@ REPORT_PATH = Path("reports") / "summary.md"
 
 def _common(parser: argparse.ArgumentParser, suppress: bool) -> None:
     default = argparse.SUPPRESS if suppress else None
-    parser.add_argument("--provider", default=default, help="LLM provider for this command: grok, claude, or offline")
+    parser.add_argument("--provider", default=default, choices=["grok", "claude"],
+                        help="LLM provider for this command: grok or claude (needs XAI_API_KEY or ANTHROPIC_API_KEY)")
     parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS if suppress else False,
                         help="print one JSON object per run instead of formatted output")
     parser.add_argument("--verbose", action="store_true", default=argparse.SUPPRESS if suppress else False,
@@ -103,7 +104,8 @@ def _ensure_db(out: Output) -> None:
 
 
 def _recover(out: Output, provider: str | None) -> None:
-    """Startup recovery: interrupted payment batch, then runs left mid-pipeline (processed again)."""
+    """Startup recovery: interrupted payment batch, then runs left mid-pipeline (processed again once
+    an LLM key is set; until then they wait as Uploaded)."""
     from acme.payments import recover_interrupted_batch
     from acme.workflow import process_run, recover_orphaned_runs
 
@@ -111,7 +113,11 @@ def _recover(out: Output, provider: str | None) -> None:
     if recovered["paid"] or recovered["requeued"]:
         out.text(f"Recovered an interrupted payment batch: {recovered['paid']} paid, "
                  f"{recovered['requeued']} re-queued.", "yellow")
-    for run_id in recover_orphaned_runs():
+    orphaned = recover_orphaned_runs()
+    if orphaned and not key_status().configured:
+        out.text(f"{len(orphaned)} interrupted run(s) wait for an LLM key before they are processed.", "yellow")
+        return
+    for run_id in orphaned:
         out.text(f"Resuming interrupted run {run_id}", "yellow")
         _report(out, process_run(run_id, provider))
 
@@ -374,10 +380,16 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     try:
         with use_provider(args.provider):
-            if processing:
-                check_keys()
+            status = key_status()
     except ProviderConfigError as exc:
         out.error(str(exc))
+        return 2
+    if processing and not status.configured:
+        message = missing_key_message(status.missing_key, status.provider)
+        if out.json:
+            out.emit({"error": message, "missing_key": status.missing_key})
+        else:
+            out.error(message)
         return 2
     if not (processing or args.explain or args.command or args.pay):
         parser.print_help()

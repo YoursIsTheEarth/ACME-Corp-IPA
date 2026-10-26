@@ -1,5 +1,5 @@
 import { DecimalPipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -7,6 +7,7 @@ import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { Router, RouterLink } from '@angular/router';
 
 import { Stores } from '../../core/live-store';
+import { NO_LLM_TOKEN, missingLlmKey, setKeyHint } from '../../core/llm-key';
 import { ToastService } from '../../core/toast.service';
 import { UploadService } from '../../core/upload.service';
 import { DropZoneComponent } from './drop-zone.component';
@@ -27,6 +28,11 @@ export class HomePage {
   readonly items = this.uploads.items;
   readonly stats = toSignal(inject(Stores).stats.data$);
   readonly lastAccepted = signal<number | null>(null);
+  /** Why uploads are off: no LLM key is configured on the backend. */
+  readonly uploadsOff = computed(() => {
+    const key = missingLlmKey(this.stats());
+    return key ? `${NO_LLM_TOKEN}. ${setKeyHint(key)}` : null;
+  });
 
   onFiles(files: File[]): void {
     this.uploads.add(files).subscribe(({ accepted }) => {

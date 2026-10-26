@@ -14,7 +14,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from acme import payments, workflow
-from acme.llm import active_models
+from acme.llm import active_models, key_status
 from acme.logging import read_trace
 from acme.payments._store import row_key
 from acme.payments.revisions import money
@@ -379,10 +379,13 @@ def payment_queue_view(conn: sqlite3.Connection, now: datetime | None = None) ->
 # --- stats ------------------------------------------------------------------------------------
 
 def llm_info() -> dict[str, Any]:
-    """Active provider and model (the AI VP's, which is LLM_PROVIDER unless overridden) plus every role."""
+    """Active provider and model (the AI VP's, which is LLM_PROVIDER unless overridden), every role,
+    and the key status (`configured`, `missing_key`)."""
     roles = active_models()
     primary = roles.get("approval") or next(iter(roles.values()))
-    return {"provider": primary["provider"], "model": primary["model"], "roles": roles}
+    status = key_status()
+    return {"provider": primary["provider"], "model": primary["model"], "roles": roles,
+            "configured": status.configured, "missing_key": status.missing_key}
 
 
 def stats(conn: sqlite3.Connection) -> dict[str, Any]:

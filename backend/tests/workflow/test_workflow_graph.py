@@ -9,10 +9,10 @@ from langchain_core.messages import AIMessage
 import acme.ingestion.llm_extract as llm_extract_module
 import acme.ingestion.service as ingestion_service
 import acme.validation.agent as validation_agent
-from acme.llm import register_handler
 from acme.logging import read_trace
 from acme.models import Critique, Decision, Outcome
 from acme.workflow import run_invoice, run_state
+from fake_llm import register_handler
 from fakes import ScriptedToolModel
 from workflow_helpers import INVOICES, codes, events, queue_rows, run_row
 

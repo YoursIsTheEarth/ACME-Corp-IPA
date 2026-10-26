@@ -1,14 +1,6 @@
 import pytest
 
 from acme.payments import mock_bank
-from workflow_helpers import restore_offline
-
-
-@pytest.fixture(autouse=True)
-def _offline_defaults():
-    restore_offline()
-    yield
-    restore_offline()
 
 
 @pytest.fixture

@@ -85,7 +85,7 @@ def test_detail_of_rejected_1009(api_golden):
         f["code"] for f in detail["findings"]}
     agents = {e["agent"] for e in detail["timeline"]}
     assert {"ingestion", "normalizer", "validation", "approval", "disposition"} <= agents
-    assert detail["drafts"] and all(d["provider"] == "offline" and d["model"] for d in detail["drafts"])
+    assert detail["drafts"] and all(d["provider"] == "grok" and d["model"] for d in detail["drafts"])
     assert detail["rejection"]["final_status"] == "Rejected" and detail["invoice"]["invoice_number"] == "INV-1009"
 
 

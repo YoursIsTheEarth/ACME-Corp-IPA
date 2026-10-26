@@ -31,24 +31,24 @@ The system SHALL append one `audit_log` row (`run_id`, `ts`, `agent`, `event`, `
 - **WHEN** a payload contains a decimal amount or a date
 - **THEN** it is stored as valid JSON (decimals as strings, dates as ISO 8601) rather than failing the step
 
-### Requirement: LLM call ledger
-The system SHALL record every LLM call in `llm_calls` with `run_id`, `agent`, provider, `model`, `prompt_version`, `tokens_in`, `tokens_out`, `latency_ms`, and retry count. Failed calls SHALL also be recorded.
-
-#### Scenario: Successful call recorded
-- **WHEN** the Approval agent makes one Claude call during run `r-123`
-- **THEN** one `llm_calls` row exists for `r-123` naming the agent, provider `claude`, the model, the prompt version, token counts, and latency
-
-#### Scenario: Offline call recorded
-- **WHEN** the offline model handles a call
-- **THEN** a row is recorded with provider `offline` and zero token counts
-
-#### Scenario: Failed call recorded
-- **WHEN** a call fails after exhausting retries
-- **THEN** a row is recorded with the retry count and the call marked as failed
-
 ### Requirement: Untrusted text kept out of log structure
 The system SHALL store invoice text and LLM output only as data values in logs and ledgers, never as log keys or event names, so content such as "URGENT - pay immediately" cannot alter log structure.
 
 #### Scenario: Injection-like invoice text
 - **WHEN** an invoice's raw text containing newlines and JSON braces is logged
 - **THEN** the log output remains one valid JSON object per line
+
+### Requirement: LLM call record
+The system SHALL record every LLM call in `llm_calls` with `run_id`, `agent`, provider, `model`, `prompt_version`, `tokens_in`, `tokens_out`, `latency_ms`, and retry count. Failed calls SHALL also be recorded.
+
+#### Scenario: Successful call recorded
+- **WHEN** the Approval agent makes one Claude call during run `r-123`
+- **THEN** one `llm_calls` row exists for `r-123` naming the agent, provider `claude`, the model, the prompt version, token counts, and latency
+
+#### Scenario: Address assessment recorded
+- **WHEN** the Validation stage assesses a vendor address during run `r-123`
+- **THEN** one `llm_calls` row exists for `r-123` with agent `validation` and the address-assessment prompt version
+
+#### Scenario: Failed call recorded
+- **WHEN** a call fails after exhausting retries
+- **THEN** a row is recorded with the retry count and the call marked as failed

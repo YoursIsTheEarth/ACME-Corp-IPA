@@ -14,6 +14,7 @@ from acme.api import queries
 from acme.api.csv_export import csv_response
 from acme.api.deps import db, services
 from acme.db import connect
+from acme.llm import key_status, missing_key_message
 from acme.payments._store import immediate
 from acme.settings import get_settings
 
@@ -58,7 +59,14 @@ def _create_runs(accepted: list[tuple[str, Path]], upload_dir: Path) -> list[str
 @router.post("/api/invoices", status_code=202)
 async def upload_invoices(request: Request, files: list[UploadFile] | None = File(None),
                           file: list[UploadFile] | None = File(None)) -> dict[str, Any]:
-    """Multipart upload of one or more files (field `files`; `file` also accepted). Each file is judged alone."""
+    """Multipart upload of one or more files (field `files`; `file` also accepted). Each file is judged alone.
+
+    503 `llm_not_configured` (nothing stored, no run created) while the LLM API key is missing.
+    """
+    status = key_status()
+    if not status.configured:
+        raise HTTPException(503, {"code": "llm_not_configured", "missing_key": status.missing_key,
+                                  "message": missing_key_message(status.missing_key, status.provider)})
     uploads = [*(files or []), *(file or [])]
     if not uploads:
         raise HTTPException(422, "No files in the request; send them as multipart field 'files'.")

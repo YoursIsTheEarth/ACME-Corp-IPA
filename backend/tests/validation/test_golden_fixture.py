@@ -1,4 +1,4 @@
-"""The hand-coded golden invoices equal what ingestion + normalization produce offline."""
+"""The hand-coded golden invoices equal what ingestion + normalization produce with the test fake model."""
 
 from pathlib import Path
 

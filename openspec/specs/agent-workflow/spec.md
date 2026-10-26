@@ -94,10 +94,10 @@ Invoice text SHALL be treated as data in every LLM call. Instructions embedded i
 - **THEN** the outcome is REJECT with `UNKNOWN_ITEM`
 
 ### Requirement: Golden outcomes for the provided files
-Processing all 20 files in `data/invoices/` in sorted filename order in offline mode, followed by one payment batch, SHALL produce the outcome, paid amount, and key finding codes listed for each file in the Full golden batch scenario (F20).
+Processing all 20 files in `data/invoices/` in sorted filename order with the test-only fake model standing in for the LLM provider, followed by one payment batch, SHALL produce the outcome, paid amount, and key finding codes listed for each file in the Full golden batch scenario (F20).
 
 #### Scenario: Full golden batch
-- **WHEN** all 20 files are processed in sorted filename order in offline mode and one payment batch runs
+- **WHEN** all 20 files are processed in sorted filename order with the test-only fake model and one payment batch runs
 - **THEN** each file's outcome and key finding codes match the table below, the paid amounts match, and the counts are 7 paid, 1 superseded, 1 held, 11 rejected (3 as duplicates)
 
 | File | Outcome | Paid in batch | Key finding codes |
@@ -122,6 +122,10 @@ Processing all 20 files in `data/invoices/` in sorted filename order in offline 
 | invoice_1014.xml | PAID | EUR 4,125.00 converted to USD at the configured rate | `CURRENCY_CONVERTED` |
 | invoice_1015.csv | PAID | $6,500.00 | none |
 | invoice_1016.json | REJECT | | `UNKNOWN_ITEM` |
+
+#### Scenario: Address verdict from the model
+- **WHEN** invoice_1005.json is processed in the golden batch
+- **THEN** its `SUSPICIOUS_ADDRESS` finding comes from the address assessment with `source` = `llm`, not from a configured address list
 
 ### Requirement: Staged golden expectations until P1 lands
 Golden rows whose expected outcome or finding codes depend on P1 features (F7, F11, F12) SHALL be marked strict expected-failures, tagged with the feature they need, until that feature lands; every other row SHALL pass at the end of P0.

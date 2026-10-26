@@ -8,7 +8,7 @@ from acme.validation import ValidationContext, run_checks, run_validation
 from acme.validation import agent as validation_agent
 from acme.validation.agent import END, START, render_prompt
 from fakes import ScriptedToolModel, tool_calls
-from golden_invoices import EXPECTED_OUTCOME, GOLDEN, GOLDEN_FILES, record_processed
+from golden_invoices import EXPECTED_OUTCOME, GOLDEN, GOLDEN_FILES, assessed, record_processed
 
 CHECK_TOOLS = ["lookup_item", "check_stock", "reconcile_math", "check_integrity", "check_duplicate",
                "check_vendor", "fraud_signals", "check_prices"]
@@ -88,9 +88,9 @@ def test_unknown_tool_and_bad_args_do_not_crash(ctx, golden, monkeypatch):
 
 def test_deterministic_findings_identical_with_or_without_tool_calls(ctx, golden, monkeypatch):
     invoice = golden["invoice_1009.json"]
-    offline = run_validation(state_for(invoice), ctx).findings
+    planned = run_validation(state_for(invoice), ctx).findings
     use_model(monkeypatch, lambda msgs, n: AIMessage("No tools needed."))
-    assert run_validation(state_for(invoice), ctx).findings == offline == run_checks(invoice, ctx)
+    assert run_validation(state_for(invoice), ctx).findings == planned == run_checks(invoice, ctx)
 
 
 def test_keeps_earlier_findings_and_dedupes(ctx, golden):
@@ -127,19 +127,19 @@ def test_injected_instruction_does_not_suppress_findings(ctx, golden, monkeypatc
     assert {C.MISSING_VENDOR, C.INVALID_QUANTITY, C.MATH_MISMATCH, C.MISSING_DUE_DATE} <= {f.code for f in state.findings}
 
 
-# --- 3.4 offline ------------------------------------------------------------------------
+# --- 3.4 fake model ------------------------------------------------------------------------
 
-def test_offline_plan_calls_every_check_once(ctx, golden):
+def test_fake_plan_calls_every_check_once(ctx, golden):
     state = run_validation(state_for(golden["invoice_1001.txt"]), ctx)
-    assert state.trace[0]["tools"] == CHECK_TOOLS and state.trace[0]["provider"] == "offline"
+    assert state.trace[0]["tools"] == CHECK_TOOLS and state.trace[0]["provider"] == "grok"
     assert state.trace[-1]["swept"] == []
 
 
-def test_offline_golden_findings_match_deterministic_checks(seeded_db):
+def test_fake_golden_findings_match_deterministic_checks(seeded_db):
     for name in GOLDEN_FILES:
         ctx = ValidationContext.load(seeded_db)
         state = run_validation(state_for(GOLDEN[name], run_id=f"r-{name}"), ctx)
-        assert state.findings == run_checks(GOLDEN[name], ctx), name
+        assert state.findings == run_checks(GOLDEN[name], assessed(ctx, GOLDEN[name])), name
         record_processed(seeded_db, GOLDEN[name], EXPECTED_OUTCOME[name], f"r-{name}")
 
 
@@ -155,4 +155,4 @@ def test_revision_context_on_state_and_audit(seeded_db, golden):
 def test_prompt_version_logged(ctx, golden, seeded_db):
     run_validation(state_for(golden["invoice_1001.txt"], run_id="r-pv"), ctx)
     rows = seeded_db.execute("SELECT agent, prompt_version, provider FROM llm_calls WHERE run_id='r-pv'").fetchall()
-    assert [tuple(r) for r in rows] == [("validation", "validation_v1", "offline")] * 2
+    assert [tuple(r) for r in rows] == [("validation", "validation_v1", "fake")] * 2

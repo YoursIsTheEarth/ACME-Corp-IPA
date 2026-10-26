@@ -16,6 +16,7 @@ import { Stats } from '../core/api.models';
 import { DetailDrawer } from '../core/drawer';
 import { EventStreamService } from '../core/event-stream.service';
 import { Stores } from '../core/live-store';
+import { NO_LLM_TOKEN, missingLlmKey, setKeyHint } from '../core/llm-key';
 import { NotificationsService } from '../core/notifications.service';
 import { InvoiceDrawerComponent } from '../detail/invoice-drawer.component';
 
@@ -38,7 +39,7 @@ export const NAV_ITEMS: NavItem[] = [
   { path: '/payments', label: 'Payments', icon: 'payments' },
 ];
 
-const PROVIDER_LABELS: Record<string, string> = { grok: 'Grok', claude: 'Claude', offline: 'Offline' };
+const PROVIDER_LABELS: Record<string, string> = { grok: 'Grok', claude: 'Claude' };
 
 @Component({
   selector: 'app-root',
@@ -89,6 +90,9 @@ export class ShellComponent implements OnInit {
     return llm ? (PROVIDER_LABELS[llm.provider] ?? llm.provider) : null;
   });
   readonly model = computed(() => this.stats()?.llm?.model ?? null);
+  readonly missingKey = computed(() => missingLlmKey(this.stats()));
+  readonly noToken = NO_LLM_TOKEN;
+  readonly keyHint = setKeyHint;
 
   ngOnInit(): void {
     this.notifications.start(this.destroyRef);

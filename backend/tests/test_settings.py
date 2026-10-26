@@ -12,6 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def test_catalog_defaults(monkeypatch):
     monkeypatch.delenv("LLM_PROVIDER")
+    monkeypatch.delenv("XAI_API_KEY")
     s = Settings()
     assert s.llm_provider == "grok"
     assert s.grok_model == "grok-4"
@@ -23,7 +24,6 @@ def test_catalog_defaults(monkeypatch):
     assert s.fx_rates == {"EUR": Decimal("1.08")}
     assert s.price_variance_pct == Decimal("10")
     assert s.near_threshold_floor_usd == Decimal("9500.00")
-    assert s.suspicious_addresses == ["1600 Pennsylvania Ave"]
     assert s.fraud_signal_weights["suspicious_address"] == 0.30
     assert sum(s.fraud_signal_weights.values()) == pytest.approx(1.40)
     assert s.fraud_threshold == 0.60
@@ -57,6 +57,7 @@ def test_dotenv_values_load(tmp_path, monkeypatch):
 
 def test_env_example_matches_defaults(tmp_path, monkeypatch):
     monkeypatch.delenv("LLM_PROVIDER")
+    monkeypatch.delenv("XAI_API_KEY")
     shutil.copy(REPO_ROOT / ".env.example", tmp_path / ".env")
     from_example = Settings().model_dump()
     (tmp_path / ".env").unlink()
@@ -69,3 +70,9 @@ def test_env_example_matches_defaults(tmp_path, monkeypatch):
     lines = (REPO_ROOT / ".env.example").read_text().splitlines()
     names = {line.split("=", 1)[0] for line in lines if "=" in line and not line.startswith("#")}
     assert names == {name.upper() for name in Settings.model_fields}
+
+
+def test_removed_suspicious_addresses_setting_is_ignored(tmp_path, monkeypatch):
+    (tmp_path / ".env").write_text('SUSPICIOUS_ADDRESSES=["1600 Pennsylvania Ave"]\n')
+    monkeypatch.setenv("SUSPICIOUS_ADDRESSES", '["1 Main St"]')
+    assert not hasattr(get_settings(), "suspicious_addresses")

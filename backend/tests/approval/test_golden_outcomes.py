@@ -1,4 +1,4 @@
-"""Task 7.1: ingest -> normalize -> validate -> approve, offline, over all 20 files in sorted order."""
+"""Task 7.1: ingest -> normalize -> validate -> approve, with the test fake model, over all 20 files in sorted order."""
 
 from pathlib import Path
 

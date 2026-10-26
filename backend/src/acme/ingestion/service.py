@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-from acme.ingestion import offline  # noqa: F401  (registers the offline extraction handler)
 from acme.ingestion.llm_extract import check_line_sum, llm_extract
 from acme.ingestion.parsers import parse_csv, parse_json, parse_xml
 from acme.ingestion.pdf import pdf_to_text

@@ -7,11 +7,11 @@ import re
 from collections import defaultdict
 from decimal import Decimal
 
-from acme.models import Finding, FindingCode as C, Invoice, RevisionContext
+from acme.models import Finding, FindingCode as C, FindingSource, Invoice, RevisionContext
 from acme.normalization.cleaners import is_relative_date
 from acme.settings import get_settings
 from acme.validation.codes import finding
-from acme.validation.context import ValidationContext, content_hash, normalize_name
+from acme.validation.context import ValidationContext, content_hash
 
 TOLERANCE = Decimal("0.01")  # differences under one cent are rounding; a full cent is a mismatch
 
@@ -188,10 +188,9 @@ _WIRE = re.compile(r"\bwire\b", re.IGNORECASE)
 _IMMEDIATE_TERMS = re.compile(r"\b(immediate\w*|due on receipt|upon receipt)\b", re.IGNORECASE)
 
 
-def suspicious_address(invoice: Invoice) -> str | None:
-    address = normalize_name(invoice.vendor_address)
-    return next((entry for entry in get_settings().suspicious_addresses
-                 if address and normalize_name(entry) in address), None)
+def implausible_address(ctx: ValidationContext) -> bool:
+    """The LLM judged the vendor address implausible (no assessment: no signal)."""
+    return ctx.address_assessment is not None and not ctx.address_assessment.plausible
 
 
 def near_threshold(invoice: Invoice) -> bool:
@@ -211,7 +210,7 @@ def fraud_score(invoice: Invoice, ctx: ValidationContext) -> tuple[float, list[s
         "immediate_terms": bool(_IMMEDIATE_TERMS.search(invoice.payment_terms or "")),
         "relative_due_date": due_relative,
         "unknown_vendor": bool(check_vendor(invoice, ctx)),
-        "suspicious_address": suspicious_address(invoice) is not None,
+        "suspicious_address": implausible_address(ctx),
         "near_threshold": near_threshold(invoice),
     }
     weights = get_settings().fraud_signal_weights
@@ -220,11 +219,16 @@ def fraud_score(invoice: Invoice, ctx: ValidationContext) -> tuple[float, list[s
 
 
 def fraud_signals(invoice: Invoice, ctx: ValidationContext) -> list[Finding]:
-    """SUSPICIOUS_ADDRESS, NEAR_THRESHOLD, and FRAUD_SUSPECTED when the score meets the threshold."""
+    """SUSPICIOUS_ADDRESS (from the LLM's address assessment, source `llm`), NEAR_THRESHOLD, and
+    FRAUD_SUSPECTED when the score meets the threshold."""
     findings = []
-    if (entry := suspicious_address(invoice)) is not None:
-        findings.append(finding(C.SUSPICIOUS_ADDRESS, f"Vendor address matches a known non-business address ({entry})",
-                                address=invoice.vendor_address, matched=entry))
+    if implausible_address(ctx):
+        verdict = ctx.address_assessment
+        findings.append(Finding(code=C.SUSPICIOUS_ADDRESS, severity=C.SUSPICIOUS_ADDRESS.severity,
+                                message=f"Vendor address is implausible for a business supplier: {verdict.reason}",
+                                evidence={"address": invoice.vendor_address, "reason": verdict.reason,
+                                          "confidence": verdict.confidence},
+                                source=FindingSource.LLM))
     if near_threshold(invoice):
         findings.append(finding(C.NEAR_THRESHOLD, f"Total {_money(invoice.total)} is just under the VP threshold",
                                 total=_money(invoice.total),

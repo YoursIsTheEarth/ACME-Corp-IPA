@@ -91,6 +91,15 @@
       </div>
     }
     <main class="main">
+      @if (missingKey(); as key) {
+        <div class="llm-banner" role="alert" data-testid="llm-banner">
+          <mat-icon>error</mat-icon>
+          <div>
+            <strong>{{ noToken }}</strong>
+            <div>{{ keyHint(key) }}</div>
+          </div>
+        </div>
+      }
       <router-outlet />
     </main>
   </mat-sidenav-content>

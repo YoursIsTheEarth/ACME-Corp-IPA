@@ -1,4 +1,4 @@
-"""Golden suite (F20): all 20 provided files in sorted filename order, offline, then one payment batch.
+"""Golden suite (F20): all 20 provided files in sorted filename order, with the test-only fake model, then one payment batch.
 
 Rows that needed a P1 feature were staged as strict expected failures (`NEEDS_FEATURE`); F7, F11,
 and F12 have landed, so no row is tagged and the outcome-count assert runs.
@@ -14,7 +14,8 @@ from acme.logging import read_trace
 from acme.payments import mock_bank, run_batch
 from acme.settings import get_settings
 from acme.workflow import run_folder, run_state
-from workflow_helpers import INVOICES, restore_offline
+import fake_llm
+from workflow_helpers import INVOICES
 
 D = Decimal
 EUR_4125 = "EUR"  # paid amount computed from the configured rate
@@ -63,7 +64,8 @@ def golden_run(tmp_path_factory):
     workdir = tmp_path_factory.mktemp("golden")
     with pytest.MonkeyPatch.context() as mp:
         mp.chdir(workdir)
-        mp.setenv("LLM_PROVIDER", "offline")
+        mp.setenv("LLM_PROVIDER", "grok")
+        mp.setenv("XAI_API_KEY", "test-key")
         mp.setenv("DB_PATH", str(workdir / "acme.db"))
         calls = []
         real_payment = mock_bank.mock_payment
@@ -71,7 +73,7 @@ def golden_run(tmp_path_factory):
                    or real_payment(vendor, amount))
         mock_bank.reset()
         get_settings.cache_clear()
-        restore_offline()
+        fake_llm.install(mp)
         conn = connect()
         try:
             seed(conn)
@@ -140,6 +142,12 @@ def test_aggregated_stock_overrun_1013(golden_run):
     stock = [f for f in golden_run["states"]["invoice_1013.json"].findings
              if f.code.value == "STOCK_EXCEEDED" and f.evidence["sku"] == "WidgetA"]
     assert [(f.evidence["billed"], f.evidence["stock"]) for f in stock] == [(22, 15)]
+
+
+def test_1005_address_verdict_from_the_model(golden_run):
+    [address] = [f for f in golden_run["states"]["invoice_1005.json"].findings if f.code.value == "SUSPICIOUS_ADDRESS"]
+    assert address.source.value == "llm" and address.severity.value == "WARNING"
+    assert address.evidence["reason"] and "matched" not in address.evidence
 
 
 # --- 6.2 aggregate asserts -------------------------------------------------------------------

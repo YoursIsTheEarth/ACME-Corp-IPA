@@ -22,7 +22,7 @@ function stats(partial: Partial<Stats> = {}): Stats {
     payment_queue: 0,
     paid_today: 0,
     rejected_today: 0,
-    llm: { provider: 'claude', model: 'claude-sonnet-5-5' },
+    llm: { provider: 'claude', model: 'claude-sonnet-5-5', configured: true, missing_key: null },
     server_time: '',
     ...partial,
   };
@@ -107,6 +107,21 @@ describe('ShellComponent', () => {
     await render();
     expect(el.querySelector('[data-testid=llm-provider]')!.textContent).toBe('Claude');
     expect(el.querySelector('[data-testid=llm-model]')!.textContent).toBe('claude-sonnet-5-5');
+  });
+
+  it('shows the missing-key banner while stats report no key, and hides it once a key is set', async () => {
+    expect(el.querySelector('[data-testid=llm-banner]')).toBeNull(); // no stats yet
+    stats$.next(stats({ llm: { provider: 'grok', model: 'grok-4', configured: false, missing_key: 'XAI_API_KEY' } }));
+    await render();
+    const banner = el.querySelector('[data-testid=llm-banner]')!;
+    expect(banner.getAttribute('role')).toBe('alert');
+    expect(banner.textContent).toContain('No LLM token provided — the app cannot process invoices without it');
+    expect(banner.textContent).toContain('Set XAI_API_KEY in .env and restart the backend.');
+    expect(el.querySelector('[data-testid=llm-provider]')!.textContent).toBe('Grok');
+
+    stats$.next(stats());
+    await render();
+    expect(el.querySelector('[data-testid=llm-banner]')).toBeNull();
   });
 
   it('is a persistent side nav at 1200 px and an icon rail with overlay at 800 px', async () => {

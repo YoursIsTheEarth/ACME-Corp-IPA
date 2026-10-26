@@ -1,5 +1,24 @@
 # Galatiq Case: Invoice Processing Automation
 
+## Configure an LLM key (read first)
+
+The agents in this solution run on a real LLM: xAI Grok (the default) or Anthropic Claude. The case text below says to assume no internet and simulate everything locally; we decided against a simulated model, so offline mode was removed and invoices are processed only when an API key is set. Mock payment and inventory still run locally.
+
+```bash
+cp .env.example .env
+# then set one key in .env:
+XAI_API_KEY=...                                   # Grok (LLM_PROVIDER=grok, the default)
+ANTHROPIC_API_KEY=...  and  LLM_PROVIDER=claude   # Claude
+```
+
+What a reviewer without a key can still do:
+
+- The CLI's processing commands (`--invoice_path`, `--batch`) stop before creating a run and print "No LLM token provided: set XAI_API_KEY for Grok (in .env or the environment). The app cannot process invoices without it." `--explain`, `review`, and `payments run` still work.
+- The web app loads with a "No LLM token provided" banner naming the variable, and uploads are disabled (the API answers 503 `llm_not_configured`). Lists, review decisions, and payments stay usable. `run.sh` and `make dev` start both servers and print the same warning.
+- Every test suite runs with no key and no network: the tests use a deterministic fake model that no setting or flag can select.
+
+Network: the backend must reach `api.x.ai` (Grok) or `api.anthropic.com` (Claude) over HTTPS. Behind a firewall or a sandbox proxy, a blocked call comes back as an HTTP 403 from the proxy: allow that host (the 403 body says how), then retry. A blocked or failed call never produces an outcome; the invoice fails closed, and `python main.py --explain <run_id>` shows the error.
+
 ## Background
 
 Acme Corp is a PE-backed manufacturing firm losing **$2M/year** on manual invoice processing. Invoices arrive via email as PDFs in messy formats with frequent errors. Staff manually extract data, validate against a legacy inventory database (inconsistent), obtain VP approval (via email chains), and process payment (via a banking API).
@@ -120,13 +139,13 @@ Submit your solution as a link to a public GitHub repository — GitHub only (gi
 
 ## CLI usage
 
-Setup is in `backend/README.md`. Run every command from the repo root with the backend venv active. `python -m acme.db seed` creates `acme.db`; the CLI also seeds an empty database on first use. Add `--provider offline` to run with no API key.
+Setup is in `backend/README.md`. Run every command from the repo root with the backend venv active. `python -m acme.db seed` creates `acme.db`; the CLI also seeds an empty database on first use. Processing needs an LLM key (see "Configure an LLM key" at the top).
 
 ```bash
 python main.py --invoice_path=data/invoices/invoice_1001.txt               # one file: stages, findings, outcome, run_id
 python main.py --invoice_path=data/invoices/invoice_1002.txt --json        # one JSON object per run on stdout
-python main.py --batch data/invoices --provider offline                    # every file, sorted by name, results table
-python main.py --batch data/invoices --provider offline --pay              # ... then one payment batch
+python main.py --batch data/invoices                                       # every file, sorted by name, results table
+python main.py --batch data/invoices --pay                                 # ... then one payment batch
 python main.py payments run                                                # pay everything queued now
 python main.py payments run --released-by Dana                             # name recorded on the batch (default: cli)
 python main.py review                                                      # list invoices awaiting review
@@ -138,7 +157,7 @@ python main.py --explain <run_id>                                          # rep
 | --- | --- |
 | `--invoice_path=<file>` | Process one invoice file. Exits 0 whenever the run reaches an outcome; a missing file exits 1 |
 | `--batch <dir>` | Process every supported file (`.pdf .txt .csv .json .xml .eml`) in filename order and write `reports/summary.md` |
-| `--provider grok\|claude\|offline` | LLM provider for this command only; a missing API key stops the command before any run starts |
+| `--provider grok\|claude` | LLM provider for this command only; any other value is rejected. A missing API key stops processing (exit 2) before any run starts |
 | `--pay` | Run one payment batch (trigger `pay_all`) after processing |
 | `--released-by <name>` | Name recorded on the payment batch, 1 to 50 characters (default `cli`) |
 | `--json` | JSON lines on stdout instead of formatted output; logs stay on stderr |
@@ -148,7 +167,7 @@ python main.py --explain <run_id>                                          # rep
 | `review` | List held invoices with why each is held and the AI recommendation |
 | `review <run_id> --decision approve\|reject --reviewer <name> --rationale <text>` | Decide a held invoice (name 1 to 50 characters, rationale at least 15). The same run resumes and continues to disposition |
 
-Approved invoices are queued, never paid by the run itself; only a payment batch calls `mock_payment`. At startup the CLI finishes any interrupted payment batch and re-runs any invoice left mid-pipeline.
+Approved invoices are queued, never paid by the run itself; only a payment batch calls `mock_payment`. At startup the CLI finishes any interrupted payment batch and, when a key is set, re-runs any invoice left mid-pipeline.
 
 ## Web app: ACME Corp IPA
 
@@ -157,7 +176,7 @@ An Angular 18 app (`frontend/`) over the FastAPI backend (`backend/`, see "Web A
 Requirements: Python 3.11+ and Node 20+ (with npm). `uv` is used when present.
 
 ```bash
-cp .env.example .env        # set LLM_PROVIDER=offline to run without an API key (or add XAI_API_KEY / ANTHROPIC_API_KEY)
+cp .env.example .env        # then add XAI_API_KEY (or ANTHROPIC_API_KEY with LLM_PROVIDER=claude)
 make setup                  # backend venv + deps, frontend npm ci, seeds acme.db
 make dev                    # FastAPI on :8000 and the web app on http://localhost:4200; Ctrl+C stops both
 ```
@@ -165,12 +184,12 @@ make dev                    # FastAPI on :8000 and the web app on http://localho
 | Make target | What it does |
 | --- | --- |
 | `make setup` | Creates `backend/.venv`, installs `backend[dev]`, runs `npm ci` in `frontend/`, and seeds `acme.db` |
-| `make dev` | Runs uvicorn and `ng serve` together; `ng serve` proxies `/api` to the backend (`frontend/proxy.conf.json`) |
+| `make dev` | Runs uvicorn and `ng serve` together; `ng serve` proxies `/api` to the backend (`frontend/proxy.conf.json`). With no LLM key it prints a warning naming the variable and still starts both |
 | `make backend` / `make frontend` | Runs one of the two servers |
 | `make test` | Backend pytest suite, then the frontend component tests (headless Chrome) |
-| `make e2e` | Playwright end-to-end run: starts its own offline backend on a fresh DB and its own dev server, uploads 3 invoices, approves INV-1010, pays all, and checks Payments |
+| `make e2e` | Playwright end-to-end run: starts its own backend with the test-only fake model (no key, no LLM calls) on a fresh DB and its own dev server, uploads 3 invoices, approves INV-1010, pays all, and checks Payments |
 
-Optional: `docker compose up` runs the same two services in containers (offline provider unless `.env` says otherwise); open <http://localhost:4200>.
+Optional: `docker compose up` runs the same two services in containers, with the provider and keys from `.env` or the environment; open <http://localhost:4200>.
 
 Frontend notes:
 

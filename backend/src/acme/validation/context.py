@@ -4,6 +4,7 @@
 
 Snapshots `inventory`, `vendors`, `processed_invoices` (with the original's total from
 `invoice_runs.total_usd`), and `payments`. Validation never writes to these tables.
+`run_validation` adds the LLM's `address_assessment` for the invoice under validation.
 
 Contract for the writer of `processed_invoices` (disposition): store
 `vendor = ctx.vendor_key(invoice.vendor_name)` and `content_hash = content_hash(invoice)`,
@@ -16,10 +17,13 @@ import sqlite3
 from dataclasses import dataclass
 from decimal import Decimal
 from types import MappingProxyType
-from typing import Mapping
+from typing import TYPE_CHECKING, Mapping
 
 from acme.db import connect
 from acme.models import Invoice
+
+if TYPE_CHECKING:
+    from acme.validation.address import AddressAssessment
 
 
 def normalize_name(name: str | None) -> str:
@@ -58,6 +62,7 @@ class ValidationContext:
     approved_vendors: Mapping[str, str]  # normalized name or alias -> canonical vendor name
     processed: tuple[ProcessedInvoice, ...]
     payments: tuple[Payment, ...]
+    address_assessment: "AddressAssessment | None" = None  # set per invoice by run_validation
 
     @classmethod
     def load(cls, conn: sqlite3.Connection | None = None) -> "ValidationContext":
