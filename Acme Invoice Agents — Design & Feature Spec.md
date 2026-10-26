@@ -31,7 +31,7 @@ We will build a local multi-agent system, powered by Grok or Claude, that takes 
 | Bad payments released | 0 |
 | Duplicate payments | 0 |
 | Time per invoice (Grok or Claude) | Under 30 seconds |
-| Runs with no API key | Yes, in offline mode |
+| Runs with no API key | No: the app requires a Grok or Claude key; without one it explains what to set and processes nothing |
 
 ## Agent workflow
 
@@ -77,25 +77,34 @@ APPROVE never pays directly. It adds the invoice to the payment queue, and the P
 
 ## Payment batches
 
-Approved invoices are not paid the moment they are approved. The workflow ends by adding them to a payment queue, and a separate Payment Executor pays that queue in batches. Holding payments until a batch runs gives a late revision the chance to replace an invoice before money moves, and gives finance one predictable payment run a day.
+The workflow ends by adding an approved invoice to a payment queue, and the Payment Executor pays from that queue. When the queue is paid is set on the Admin page (F41), stored in the `admin_settings` table, and applied without a restart:
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| Delay payments | Off | Off: each approved invoice is paid as soon as it is completely processed and approved (auto, AI VP, reviewer, or revision delta), by an `immediate` batch. On: approved invoices wait for one of the triggers below. |
+| Pay at end of day | On (when delay is on) | Pays everything queued daily at the configured time and timezone, default 5:00 PM Central (America/Chicago) |
+| Pay when the Invoice Queue is empty | On (when delay is on) | The idle trigger below |
+
+Delaying payments gives a late revision the chance to replace an invoice before money moves, and gives finance one predictable payment run a day. Paying at approval is the default because most invoices are never revised, and vendors are paid days sooner. In immediate mode a revision usually arrives after the original is paid, so the paid-original rows of the revision table apply.
 
 **When a batch runs**
 
 | Trigger | When | What it pays |
 | --- | --- | --- |
-| End of day | Daily at `PAYMENT_BATCH_TIME` (default 5:00 PM, America/Chicago) | Everything queued |
-| Invoice Queue idle | No invoice has been in Uploaded, Extracting, Validating, or Deciding for `PAYMENT_IDLE_DELAY_S` (default 60 seconds), and the payment queue is not empty | Everything queued |
+| Immediate | Delay off: right after an invoice is approved, right after any other batch finishes, and when delay is switched off | Everything queued, plus failed rows whose last attempt is `PAYMENT_IDLE_DELAY_S` old |
+| End of day | Delay and pay at end of day on: daily at the admin time and timezone (default 5:00 PM, America/Chicago) | Everything queued |
+| Invoice Queue idle | Delay and pay when queue empty on: no invoice has been in Uploaded, Extracting, Validating, or Deciding for `PAYMENT_IDLE_DELAY_S` (default 60 seconds), and the payment queue is not empty | Everything queued |
 | Pay all | A person clicks Pay all on the Payment Queue page | Everything queued |
 | Pay selected or Pay now | A person checks rows, or clicks one row's button | Only those rows |
 
-Invoices in Awaiting review don't block the idle trigger, because they can wait for days. The delay keeps a batch from firing between files of a multi-file upload. `PAYMENT_AUTO_IDLE=false` turns the idle trigger off.
+Invoices in Awaiting review don't block the idle trigger, because they can wait for days. The delay keeps a batch from firing between files of a multi-file upload. Turning Pay when the Invoice Queue is empty off on the Admin page disables the idle trigger.
 
 **Executor rules**
 
 1. One batch runs at a time, under a lock. Rows being paid show Paying and can't be picked again.
 2. Before paying, each row is re-checked: still queued, not superseded, and its idempotency key (`vendor + invoice_number + revision`) not already used. Then the executor calls `mock_payment(vendor, amount)`.
 3. A failed call marks the row Failed with the error. The next batch retries it, up to 3 attempts; after that it moves to Elevated Review.
-4. Each batch writes a `payment_batches` record: trigger, who started it, row count, total, and per-row results.
+4. Each batch writes a `payment_batches` record: trigger, who started it (System for immediate, end-of-day, and idle batches), row count, total, and per-row results.
 
 **Revisions and the queue**
 
@@ -107,7 +116,7 @@ Invoices in Awaiting review don't block the idle trigger, because they can wait 
 | Paid, same total | Recorded as Revised, no payment due. |
 | Being paid at that moment | Treated as paid once the payment completes, then handled by the rows above. |
 
-From the CLI, `--pay` runs a batch after processing, and `python main.py payments run` runs one on demand.
+From the CLI, `--pay` runs a batch after processing, `python main.py payments run` runs one on demand, and `python main.py admin show` / `admin set` read and change the payment timing. CLI processing follows the same settings, so with delay off each approved invoice is paid as it finishes.
 
 ## Web app: ACME Corp IPA
 
@@ -128,12 +137,13 @@ Each status appears on exactly one page, except Awaiting review, which shows in 
 
 ## Web app pages
 
-ACME Corp IPA has five pages behind one persistent left sidebar. All four tables share the same Angular Material table setup: sortable columns, a search box, pagination, a status chip with consistent colors, and a row click that opens the invoice detail drawer.
+ACME Corp IPA has six main pages and an Admin page behind one persistent left sidebar. All four tables share the same Angular Material table setup: sortable columns, a search box, pagination, a status chip with consistent colors, and a row click that opens the invoice detail drawer.
 
 **App shell and sidebar**
 
 - Top of the sidebar: the "ACME Corp IPA" name and a short tagline, "Invoice Processing Automation."
-- Menu items in order: Home, Invoice Queue, Invoice Resolution Audit, Invoice Elevated Review, Payment Queue, Payments. The active page is highlighted.
+- Menu items in order: Home, Invoice Queue, Payment Queue, Invoice Elevated Review, Invoice Resolution Audit, Payments. The active page is highlighted.
+- Admin sits apart from the main menu, pinned toward the bottom of the sidebar above the provider footer, with its own icon and no badge.
 - Invoice Queue, Invoice Elevated Review, and Payment Queue show a live count badge, so reviewers see waiting work from any page.
 - Below 960 px wide, the sidebar collapses to icons and opens as an overlay.
 
@@ -166,7 +176,7 @@ An approved invoice leaves this table for the Payment Queue; a rejected one move
 | Column | Content |
 | --- | --- |
 | Invoice # / Vendor / Amount (USD) | From the extracted invoice |
-| Final status | Paid, Rejected, Duplicate, Superseded, or Credit confirmed |
+| Final status | Paid, Revised, Rejected, Duplicate, Superseded, or Credit confirmed |
 | Decided by | Auto (rules), AI VP (with provider and model), or the reviewer's name |
 | Key findings | Up to 3 finding chips, such as Stock exceeded or Price variance |
 | Completed | Timestamp and total processing time |
@@ -194,7 +204,7 @@ Clicking Approve or Reject opens a dialog:
 
 **Payment Queue:** approved invoices waiting to be paid, and the controls to pay them.
 
-- A header shows the count and total queued, the next scheduled batch ("Today 5:00 PM CT"), and whether auto-pay on idle is on.
+- A header shows the count and total queued and the payment mode, with a link to Admin. With delay on it shows the next end-of-day batch ("Today 5:00 PM CT") and whether paying when the queue is empty is on; with delay off it says approved invoices are paid at approval, so the table normally holds only failed rows or rows waiting on a running batch.
 - Pay all pays every queued row; Pay selected pays the checked rows; each row has its own Pay now button.
 - Every pay action opens a confirm dialog with the row count, the total, and the same typed name field as reviews (1 to 50 characters), so the payment record shows who released it.
 
@@ -221,10 +231,22 @@ When a revision replaces a queued invoice, the original's row disappears (it sho
 | Approved by | Auto, AI VP, or the reviewer's name |
 | Paid at | Timestamp |
 | Idempotency key | Shows why a duplicate was never paid twice |
-| Batch | Batch ID and what started it: End of day, Invoice Queue idle, Pay all, Pay selected, or Pay now |
-| Released by | System for scheduled and idle batches, or the name typed by the person who clicked Pay |
+| Batch | Batch ID and what started it: Immediate, End of day, Invoice Queue idle, Pay all, Pay selected, or Pay now |
+| Released by | System for immediate, scheduled, and idle batches, or the name typed by the person who clicked Pay |
 
 A footer shows the total paid for the current filter. Filters by date and vendor; export to CSV.
+
+**Admin:** payment timing, saved to `admin_settings` and applied without a restart.
+
+| Element | Behavior |
+| --- | --- |
+| Delay payments | Toggle, default off. Off: approved invoices are paid as soon as they are approved. The page says so in one sentence. |
+| Pay at end of day | Shown when delay is on; default on. Time picker (default 5:00 PM) and IANA timezone picker (default Central Time, America/Chicago, with common US zones and UTC listed first); both disabled while this is off |
+| Pay when the Invoice Queue is empty | Shown when delay is on; default on. The idle trigger, after `PAYMENT_IDLE_DELAY_S` |
+| Last saved | Who saved the settings and when |
+| Save | Enabled only when something changed and the form is valid. Opens a confirm dialog listing the changes, with the same typed name field as reviews (1 to 50 characters). A toast confirms; a 422 shows on its field. Turning delay off warns that saving pays everything queued now. |
+
+If someone else saves while the page is open, an unchanged form refreshes; a form with unsaved edits shows a warning and offers to reload.
 
 **Invoice detail drawer (shared):** opens from any table. It shows a preview of the original file beside the extracted fields, the findings, and the full stage timeline from the audit ledger.
 
@@ -243,11 +265,13 @@ A FastAPI service wraps the same pipeline the CLI uses, so both paths produce id
 | POST | `/api/invoices/{id}/review` | Review dialog | Body: `decision` (approve or reject), `rationale`, `reviewer`. The reviewer name must be 1 to 50 characters after trimming, or the API returns 422. Resumes the workflow. Returns 409 if the invoice is no longer awaiting review |
 | GET | `/api/payments` | Payments | Paid invoices with payment ID, amount, approver, and idempotency key |
 | GET | `/api/stats` | Home tiles, sidebar badges | Counts by status and today's totals |
-| GET | `/api/events` | All pages | Server-Sent Events stream: `invoice.created`, `invoice.stage_changed`, `invoice.resolved`, `payment.queued`, `payment.cancelled`, `batch.started`, `batch.finished`, `payment.created` |
+| GET | `/api/events` | All pages | Server-Sent Events stream: `invoice.created`, `invoice.stage_changed`, `invoice.resolved`, `payment.queued`, `payment.cancelled`, `batch.started`, `batch.finished`, `payment.created`, `settings.updated` |
 | GET | `/api/invoices.csv`, `/api/payments.csv` | Audit, Payments | CSV export of the current filter |
-| GET | /api/payment-queue | Payment Queue | Queued and failed payments, the queued total, the next scheduled batch time, and whether auto-pay on idle is on |
+| GET | /api/payment-queue | Payment Queue | Queued and failed payments, the queued total, and the payment mode: delay on or off, the next end-of-day batch time (null when none), and whether paying when the queue is empty is on |
 | POST | /api/payment-queue/execute | Pay all, Pay selected, Pay now | Body: optional ids (omit for all) and released\_by (1 to 50 characters). Starts a batch and returns 202 with the batch ID; returns 409 if a batch is already running |
 | GET | /api/payment-batches | Payments, toasts | Batch history: trigger, released by, count, total, failures |
+| GET | /api/admin/settings | Admin | Payment timing: delay payments, pay at end of day, end-of-day time and timezone, pay when queue empty, and who last saved them; defaults when never saved |
+| PUT | /api/admin/settings | Admin save dialog | Body: the five settings and `updated_by` (1 to 50 characters). Saves, audits old and new values, reschedules batches without a restart, and broadcasts `settings.updated`. Returns 422 on a bad time, unknown timezone, or invalid name |
 
 **Human-in-the-loop.** When the rules engine or the LLM returns NEEDS\_REVIEW, the graph pauses with LangGraph's `interrupt()`, and its state is saved by a SQLite checkpointer. The review endpoint resumes that exact run with the reviewer's decision, so the approval, payment, and audit trail stay in one continuous workflow.
 
@@ -258,7 +282,8 @@ A FastAPI service wraps the same pipeline the CLI uses, so both paths produce id
 | `invoice_runs` | `id`, `file_name`, `stored_path`, `uploaded_at`, `status`, `stage`, `invoice_number`, `vendor`, `total_usd`, `final_status`, `decided_by`, `completed_at` |
 | `review_decisions` | `run_id`, `reviewer`, `decision`, `rationale`, `decided_at` |
 | payment\_queue | id, run\_id, invoice\_number, revision, vendor, amount\_usd, kind (full, replacement, delta), status (queued, paying, paid, failed, cancelled), attempts, last\_error, queued\_at, batch\_id |
-| payment\_batches | batch\_id, trigger (end\_of\_day, idle, pay\_all, pay\_selected, pay\_now), released\_by, started\_at, finished\_at, count, total\_usd, failed\_count |
+| payment\_batches | batch\_id, trigger (immediate, end\_of\_day, idle, pay\_all, pay\_selected, pay\_now), released\_by, started\_at, finished\_at, count, total\_usd, failed\_count |
+| admin\_settings | key, value, updated\_by, updated\_at (payment timing; defaults apply to keys never saved) |
 
 CORS is open only to the Angular dev server, uploads are capped at 10 MB per file, and there is no login, consistent with the prototype's non-goals.
 
@@ -272,7 +297,6 @@ One setting, `LLM_PROVIDER`, chooses Grok or Claude for every agent. The graph, 
 | --- | --- | --- | --- |
 | Grok (default) | `langchain-xai` ([docs](https://docs.langchain.com/oss/python/integrations/chat/xai.md)) | `ChatXAI` | `XAI_API_KEY` |
 | Claude | `langchain-anthropic` | `ChatAnthropic` | `ANTHROPIC_API_KEY` |
-| Offline | built in | `RuleBasedLLM` | none |
 
 Both real providers support LangChain's `bind_tools` and `with_structured_output`, which are the only two capabilities the agents rely on. The factory wraps each model with the same timeout, retry, and logging settings.
 
@@ -280,14 +304,14 @@ Both real providers support LangChain's `bind_tools` and `with_structured_output
 
 | Setting | Default | Notes |
 | --- | --- | --- |
-| `LLM_PROVIDER` | `grok` | `grok`, `claude`, or `offline`. The CLI's `--provider` flag overrides it for one run |
+| `LLM_PROVIDER` | `grok` | `grok` or `claude`. The CLI's `--provider` flag overrides it for one run |
 | `GROK_MODEL` | a current Grok 4 model | The case README shows `grok-3`; confirm the current name in the xAI console before submitting |
 | `CLAUDE_MODEL` | `claude-sonnet-5-5` | `claude-opus-5-5` for the hardest reasoning; confirm current names on Anthropic's models page before submitting |
 | `LLM_PROVIDER_EXTRACTION`, `_VALIDATION`, `_APPROVAL`, `_CRITIC` | unset | Optional per-agent override, so one provider can check the other (see below) |
 | `LLM_TEMPERATURE` | 0 | Extraction and decisions should be repeatable |
 | `LLM_TIMEOUT_S` / `LLM_MAX_RETRIES` | 30 / 3 | Exponential backoff on 429 and 5xx |
 
-At startup the app checks that the selected provider's key is set and stops with a clear message if not. The web app's sidebar footer shows the active provider and model.
+The app checks that the selected provider's key is set before it processes anything. Without a key the CLI refuses to process with a message naming the variable to set, the API still starts but refuses uploads with 503, and the web app shows a persistent "No LLM token provided — the app cannot process invoices without it" banner. The web app's sidebar footer shows the active provider and model.
 
 **Cross-model critique (P1).** With per-agent overrides, Grok can draft the VP decision while Claude acts as the Critic, or the reverse. A second model catches mistakes the first one makes confidently, and the audit trail records which model said what.
 
@@ -295,10 +319,10 @@ At startup the app checks that the selected provider's key is set and stops with
 
 - **Structured output:** `with_structured_output(Invoice)` for extraction, `Decision` for approval, `Critique` for the critic. Pydantic validation errors are fed back into the next prompt as the self-correction signal.
 - **Tool calling:** the Validation agent gets `bind_tools([...])` with the validation tools. A LangGraph `ToolNode` executes calls and loops back until the model returns no more tool calls.
-- **Prompts:** one provider-neutral set, versioned in `prompts/`, each with a system role, the schema, and 1 to 2 few-shot examples from the clean invoices.
+- **Prompts:** one provider-neutral set, versioned in `prompts/`, each with a system role, the schema, and 1 to 2 few-shot examples from the clean invoices. The extraction prompt tells the model to drop thousands-separator commas from money and quantities ("$5,000.00" becomes "$5000.00") while keeping OCR noise for the cleaner, and the schema accepts comma quantities like "1,200" anyway.
 - **Guardrails:** invoice text is wrapped in delimiters and labeled as untrusted data, so lines like "URGENT - pay immediately" in INV-1003 are treated as evidence, not instructions.
 
-**Offline mode.** The README says to assume no internet, so `LLM_PROVIDER=offline` swaps in a `RuleBasedLLM` with the same interface: regex extraction for text invoices, template rationales, and a fixed tool plan. Tests run in this mode by default, and a fixture mode replays saved Grok and Claude responses so both paths are tested without a network.
+**No offline mode.** The case README says to assume no internet for external APIs, but we decided the agents must run on a real model: a rule-based stand-in would let the pipeline look agentic without any model reading or reasoning. Mock payment and inventory stay local. Tests never call a paid API: the test suite injects a deterministic fake chat model that is not selectable from settings or the CLI, and a later fixture mode (F34) can replay saved Grok and Claude responses.
 
 **Observability.** Every LLM call logs provider, model, prompt version, token counts, latency, and retry count to the `llm_calls` table, keyed to the invoice run. Each decision in the Resolution Audit shows which provider and model made it.
 
@@ -342,7 +366,7 @@ The stock values match the case README exactly. The reference prices are an assu
 
 ## Feature spec
 
-The MVP is the 29 P0 features: they take all 20 files to the right outcome from either the CLI or the ACME Corp IPA web app, including the human review step. P1 features add fraud scoring, currency, price checks, live updates, cross-model critique, and tests that make the submission stand out; P2 is polish if time remains.
+The MVP is the 30 P0 features: they take all 20 files to the right outcome from either the CLI or the ACME Corp IPA web app, including the human review step. P1 features add fraud scoring, currency, price checks, live updates, cross-model critique, and tests that make the submission stand out; P2 is polish if time remains.
 
 | ID | Feature | Priority | Acceptance criteria |
 | --- | --- | --- | --- |
@@ -359,7 +383,7 @@ The MVP is the 29 P0 features: they take all 20 files to the right outcome from 
 | F8 | Inventory checks | P0 - MVP | Flags unknown items, zero-stock items, and quantity over stock, aggregated per SKU across lines. INV-1013 is flagged for 22 WidgetA against 15 in stock. |
 | F9 | Data integrity checks | P0 - MVP | Flags missing vendor, missing or invalid due date, quantity of zero or less, and any mismatch between line sum, subtotal, tax, shipping, and total. INV-1009 raises at least 3 CRITICAL findings. |
 | F10 | Duplicate and revision handling | P0 - MVP | Same vendor, number, and total as a processed invoice is a CRITICAL `DUPLICATE`; the second copy of INV-1011 is never paid. A new revision is an INFO `REVISION` linked to the original. Unpaid original: the revision replaces it at its full total (INV-1004 is Superseded and R1 queues $5,940). Paid original: a higher total queues only the delta; a lower total goes to Elevated Review to confirm a credit or refund. |
-| F11 | Fraud signal scoring | P1 - Should | Weighted score from urgency language, wire-transfer requests, "Immediate" terms, past-due dates, unknown vendor, suspicious address, and totals just under $10,000. INV-1003 scores over the threshold; clean invoices score under it. |
+| F11 | Fraud signal scoring | P1 - Should | Weighted score from urgency language, wire-transfer requests, "Immediate" terms, past-due dates, unknown vendor, an address the LLM judges implausible for a supplier (no hardcoded address list), and totals just under $10,000. INV-1003 scores over the threshold; clean invoices score under it. |
 | F12 | Price variance check | P1 - Should | Unit price more than 10% from the reference price is a WARNING. The INV-1010 rush line at $300 against $250 is flagged. |
 | F13 | LLM validation agent with tools | P0 - MVP | The LLM receives the invoice and the tool list, decides which tools to call, and returns a findings summary. Every deterministic check still runs if the LLM omits a call. |
 | **Approval** |  |  |  |
@@ -368,19 +392,20 @@ The MVP is the 29 P0 features: they take all 20 files to the right outcome from 
 | **Payment and disposition** |  |  |  |
 | F16 | Payment queue and batch executor | P0 - MVP | APPROVE adds a row to the payment queue; nothing is paid at approval. The executor pays queued rows with the README's `mock_payment(vendor, amount)`, one batch at a time. A repeated idempotency key pays nothing; failed rows retry up to 3 times, then go to Elevated Review. |
 | F17 | Rejection log and review hold | P0 - MVP | REJECT writes reasons and findings to the log. NEEDS\_REVIEW pauses the workflow until a person decides on the Elevated Review page (or with a CLI command). |
-| F38 | Batch triggers | P0 - MVP | A batch runs daily at `PAYMENT_BATCH_TIME` (default 5:00 PM Central), after the Invoice Queue has had nothing in processing for `PAYMENT_IDLE_DELAY_S` (default 60 seconds), or on Pay all, Pay selected, or Pay now. Invoices awaiting review don't block the idle trigger. Each batch is recorded with its trigger and who released it. |
+| F38 | Batch triggers | P0 - MVP | With delay off (the default), an `immediate` batch pays each invoice as soon as it is approved. With delay on, a batch runs daily at the admin end-of-day time (default 5:00 PM Central) if enabled, after the Invoice Queue has had nothing in processing for `PAYMENT_IDLE_DELAY_S` (default 60 seconds) if enabled, or on Pay all, Pay selected, or Pay now. Invoices awaiting review don't block the idle trigger. Each batch is recorded with its trigger and who released it. |
 | F39 | Revision replaces queued payment | P0 - MVP | When a revision of a queued invoice is approved, the original's queued payment is cancelled before any batch can pay it, and the revision is queued for its full total. If the revision is rejected or held, the original stays Superseded and unpaid. |
 | **Platform** |  |  |  |
-| F18 | CLI | P0 - MVP | `python main.py --invoice_path=<file>` per the README, plus `--batch <dir>`, `--provider` (grok, claude, or offline), `--pay` to run a payment batch after processing, and `--json`. `python main.py payments run` runs a batch on demand. Uses `rich` to show stage progress, findings, and the final outcome. |
+| F18 | CLI | P0 - MVP | `python main.py --invoice_path=<file>` per the README, plus `--batch <dir>`, `--provider` (grok or claude), `--pay` to run a payment batch after processing, and `--json`. `python main.py payments run` runs a batch on demand. Uses `rich` to show stage progress, findings, and the final outcome. |
 | F19 | Structured logs and audit ledger | P0 - MVP | JSON logs with `run_id` and agent name. `python main.py --explain <run_id>` replays a run's trace from `audit_log`. |
-| F20 | Golden test suite | P0 - MVP | `pytest` runs all 20 files in offline mode, then one payment batch, and asserts the outcome, key finding codes, and amounts paid from the test plan. Unit tests cover parsers, rules, normalizers, and the revision cases. |
+| F20 | Golden test suite | P0 - MVP | `pytest` runs all 20 files with the test-only fake model, then one payment batch, and asserts the outcome, key finding codes, and amounts paid from the test plan. Unit tests cover parsers, rules, normalizers, and the revision cases. |
 | **Web app: ACME Corp IPA** |  |  |  |
-| F21 | App shell and sidebar | P0 - MVP | Angular app titled ACME Corp IPA with a persistent sidebar: Home, Invoice Queue, Invoice Resolution Audit, Invoice Elevated Review, Payment Queue, Payments. Active page highlighted; Invoice Queue, Elevated Review, and Payment Queue show count badges; collapses below 960 px. The footer shows the active LLM provider and model. |
+| F21 | App shell and sidebar | P0 - MVP | Angular app titled ACME Corp IPA with a persistent sidebar: Home, Invoice Queue, Payment Queue, Invoice Elevated Review, Invoice Resolution Audit, Payments. Active page highlighted; Invoice Queue, Elevated Review, and Payment Queue show count badges; collapses below 960 px. The footer shows the active LLM provider and model. |
 | F22 | Home page with drop zone | P0 - MVP | Generic welcome header. Dropping one or many files, or picking them with Browse, uploads them all; each file shows progress, then Queued or a clear error. Unsupported types and files over 10 MB are refused before upload. |
 | F23 | Invoice Queue page | P0 - MVP | Lists every invoice still being processed or awaiting review, with its stage strip and status. Stages update without a page reload; approved invoices move to the Payment Queue and rejected ones to the Audit. |
-| F24 | Invoice Resolution Audit page | P0 - MVP | Lists every resolved invoice (Paid, Rejected, Duplicate, Superseded, Credit confirmed) with decided by and key findings. Expanding a row shows the rationale timeline for every stage, including AI VP drafts, Critic responses, the provider and model behind each, and reviewer notes. |
+| F24 | Invoice Resolution Audit page | P0 - MVP | Lists every resolved invoice (Paid, Revised, Rejected, Duplicate, Superseded, Credit confirmed) with decided by and key findings. Expanding a row shows the rationale timeline for every stage, including AI VP drafts, Critic responses, the provider and model behind each, and reviewer notes. |
 | F25 | Invoice Elevated Review page and dialog | P0 - MVP | Lists invoices awaiting a person, with why each is held and the AI recommendation. Approve or Reject opens a dialog that requires a typed reviewer name of 1 to 50 characters and a rationale of at least 15 characters. Approve adds the invoice to the Payment Queue. Credit holds use Credit confirmed and Reject revision, and the rationale records the vendor's credit or refund. A stale decision gets a 409 message. |
-| F40 | Payment Queue page | P0 - MVP | Lists queued and failed payments with type (full, replacement, delta), amount, approver, and status, plus the queued total and next batch time. Pay all, Pay selected, and per-row Pay now open a confirm dialog with a typed name of 1 to 50 characters. Rows show Paying during a batch, buttons are disabled, and a toast sums up each batch. |
+| F40 | Payment Queue page | P0 - MVP | Lists queued and failed payments with type (full, replacement, delta), amount, approver, and status, plus the queued total and the payment mode (next batch time when delayed) with a link to Admin. Pay all, Pay selected, and per-row Pay now open a confirm dialog with a typed name of 1 to 50 characters. Rows show Paying during a batch, buttons are disabled, and a toast sums up each batch. |
+| F41 | Admin page and payment timing | P0 - MVP | An Admin item pinned near the bottom of the sidebar opens a payment timing form: Delay payments (default off: pay at approval); when on, Pay at end of day (default on, 5:00 PM America/Chicago, time and timezone configurable) and Pay when the Invoice Queue is empty (default on). Saving needs a typed name of 1 to 50 characters, is audited, and applies without a restart. Replaces `PAYMENT_BATCH_TIME`, `PAYMENT_TZ`, and `PAYMENT_AUTO_IDLE`. |
 | F26 | Payments page | P0 - MVP | Lists every paid invoice with payment ID, amount in USD (and original currency), approver, batch ID and trigger, released by, time, and idempotency key, with a total for the current filter. |
 | F27 | REST API and upload worker | P0 - MVP | FastAPI endpoints in the Backend API section. Uploads return 202 within 1 second; a background worker runs each invoice through the same graph as the CLI. |
 | F28 | Human-in-the-loop resume | P0 - MVP | NEEDS\_REVIEW pauses the LangGraph run with `interrupt()` and a SQLite checkpointer; the review endpoint resumes that run. Restarting the server does not lose held invoices or queued payments. |
@@ -392,12 +417,12 @@ The MVP is the 29 P0 features: they take all 20 files to the right outcome from 
 | F34 | Recorded LLM fixtures | P2 - Stretch | Saved Grok and Claude responses replay in tests so the golden suite exercises both LLM paths with no network. |
 | F35 | CSV export | P2 - Stretch | Audit and Payments export the current filter to CSV. |
 | **LLM provider** |  |  |  |
-| F36 | Switchable LLM provider | P0 - MVP | `LLM_PROVIDER=grok`, `claude`, or `offline` selects the model for every agent through one factory; no agent code changes. A missing key for the chosen provider stops startup with a clear message. The golden outcomes match with either provider. |
+| F36 | Switchable LLM provider | P0 - MVP | `LLM_PROVIDER=grok` or `claude` selects the model for every agent through one factory; no agent code changes. A missing key for the chosen provider stops all processing with a clear message naming the variable, in the CLI, API, and web app. The golden outcomes match with either provider. |
 | F37 | Cross-model critique | P1 - Should | Per-agent overrides let one provider draft the VP decision and the other act as Critic. The audit trail shows which provider and model produced each step. |
 
 ## Test plan
 
-In a batch run of all 20 files (16 invoice numbers) followed by one payment batch, 7 are paid, 1 is superseded by its revision, 1 is held for review, and 11 are rejected, 3 of them as duplicates. Files are processed in sorted filename order, and no payment runs until the last file finishes and the idle delay passes, so INV-1004 is still queued when R1 arrives and R1 replaces it. These rows become the parametrized golden test in `tests/test_golden.py`.
+With payment delay on (end of day off, pay when queue empty on), in a batch run of all 20 files (16 invoice numbers) followed by one payment batch, 7 are paid, 1 is superseded by its revision, 1 is held for review, and 11 are rejected, 3 of them as duplicates. Files are processed in sorted filename order, and no payment runs until the last file finishes and the idle delay passes, so INV-1004 is still queued when R1 arrives and R1 replaces it. These rows become the parametrized golden test in `tests/test_golden.py`. A second golden run uses the default timing (delay off): every approved invoice is paid by its own `immediate` batch, so INV-1004 is paid $1,890.00 and R1 pays only the $4,050.00 delta and ends Revised. That run ends with 7 paid, 1 revised, 0 superseded, 1 held, and 11 rejected (3 duplicates), with the same $37,620.00 paid in 8 payments.
 
 | File | What it tests | Expected outcome | Paid in batch | Key finding codes |
 | --- | --- | --- | --- | --- |
@@ -406,7 +431,7 @@ In a batch run of all 20 files (16 invoice numbers) followed by one payment batc
 | invoice\_1003.txt | FakeItem at 0 stock, $100,000, "due yesterday", urgent wire language | REJECT |  | `ZERO_STOCK`, `INVALID_DUE_DATE`, `FRAUD_SUSPECTED` |
 | invoice\_1004.json | Clean JSON, $1,890; approved and queued, then replaced by R1 before the batch | SUPERSEDED |  | `SUPERSEDED_BY_REVISION` |
 | invoice\_1004\_revised.json | Revision of an unpaid invoice; adds 5 GadgetX; $5,940 passes every rule | PAID | $5,940.00 (full total) | `REVISION` (info) |
-| invoice\_1005.json | 8 GadgetX vs 5; vendor address is 1600 Pennsylvania Ave | REJECT |  | `STOCK_EXCEEDED`, `SUSPICIOUS_ADDRESS` |
+| invoice\_1005.json | 8 GadgetX vs 5; vendor address is 1600 Pennsylvania Ave, which the LLM judges implausible for a supplier | REJECT |  | `STOCK_EXCEEDED`, `SUSPICIOUS_ADDRESS` |
 | invoice\_1006.csv | Key/value CSV with repeated keys | PAID | $2,750.00 | none |
 | invoice\_1007.csv | MM/DD dates; WidgetA 20 vs 15, WidgetB 15 vs 10 | REJECT |  | `STOCK_EXCEEDED` |
 | invoice\_1008.txt | Invoice inside an email; SuperGizmo and MegaSprocket not in DB | REJECT |  | `UNKNOWN_ITEM`, `UNKNOWN_VENDOR` |
@@ -440,6 +465,9 @@ In a batch run of all 20 files (16 invoice numbers) followed by one payment batc
 | Idle trigger | Upload 3 files; no batch runs until all 3 finish and 60 seconds pass |
 | Concurrent Pay all clicks | Second request gets 409; each row is paid once |
 | Payment failure | Row shows Failed, retries next batch, moves to Elevated Review after 3 attempts |
+| Delay turned off with rows queued | One `immediate` batch pays every queued row |
+| Approval while a batch is running, delay off | Row waits, then an `immediate` batch pays it right after the running batch |
+| End-of-day time changed on Admin | The next end-of-day batch runs at the new time with no restart |
 
 ## Assumptions, risks, and build order
 
@@ -456,7 +484,7 @@ In a batch run of all 20 files (16 invoice numbers) followed by one payment batc
 | Risk | Mitigation |
 | --- | --- |
 | LLM output varies between runs and between Grok and Claude | Temperature 0, Pydantic validation, rules engine owns the final outcome, recorded fixtures for tests |
-| No API key or network during review | Offline mode runs the whole pipeline; README shows both modes |
+| No API key or network during review | The README leads with key setup; the CLI, API, and UI say exactly which variable to set; the test suite runs with no key or network |
 | Prompt injection in invoice text | Text delimited and labeled untrusted; the LLM can't loosen an outcome |
 | Scope creep past a day | P0 first and fully tested before any P1 work |
 | Model name changes | `GROK_MODEL` and CLAUDE\_MODEL in config, confirmed before submission |
@@ -471,7 +499,7 @@ In a batch run of all 20 files (16 invoice numbers) followed by one payment batc
 
 1. Repo skeleton (`backend/`, `frontend/`), models, settings, DB seed.
 2. Deterministic parsers and normalizers (F1, F2, F5, F6) with unit tests.
-3. Validation checks and rules engine (F8, F9, F10, F14), then the golden test in offline mode.
+3. Validation checks and rules engine (F8, F9, F10, F14), then the golden test with the test-only fake model.
 4. LangGraph wiring with the review interrupt, payment queue, and rejection (F16, F17, F28), then the Payment Executor, batch triggers, and revision replacement (F38, F39), plus CLI and logs (F18, F19).
 5. FastAPI endpoints and upload worker (F27), tested with the golden files.
 6. Angular shell and sidebar, then Home, Queue, Elevated Review with its dialog, Payment Queue, Audit, and Payments (F21 to F26, F40), polling first.
