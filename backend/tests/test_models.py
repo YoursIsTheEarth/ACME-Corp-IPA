@@ -36,14 +36,17 @@ def test_codes_serialize_verbatim_and_severities():
     assert FindingCode.CURRENCY_UNSUPPORTED.severity is Severity.WARNING
     assert FindingCode.DUPLICATE.severity is Severity.CRITICAL
     assert FindingCode.NEAR_THRESHOLD.severity is Severity.INFO
+    assert FindingCode.PROMPT_INJECTION_SUSPECTED.severity is Severity.CRITICAL
+    assert FindingCode.PAYEE_CUMULATIVE_THRESHOLD.severity is Severity.WARNING
     critical = {c.value for c in FindingCode if c.severity is Severity.CRITICAL}
     assert critical == {"EXTRACTION_FAILED", "UNKNOWN_ITEM", "ZERO_STOCK", "STOCK_EXCEEDED",
                         "INVALID_QUANTITY", "MATH_MISMATCH", "MISSING_VENDOR", "DUPLICATE",
-                        "FRAUD_SUSPECTED"}
+                        "FRAUD_SUSPECTED", "PROMPT_INJECTION_SUSPECTED"}
     warning = {c.value for c in FindingCode if c.severity is Severity.WARNING}
     assert warning == {"UNKNOWN_VENDOR", "MISSING_DUE_DATE", "INVALID_DUE_DATE",
                        "DUE_BEFORE_INVOICE_DATE", "PRICE_VARIANCE", "SUSPICIOUS_ADDRESS",
-                       "REVISION_CREDIT_DUE", "INVOICE_NUMBER_REUSED", "CURRENCY_UNSUPPORTED"}
+                       "REVISION_CREDIT_DUE", "INVOICE_NUMBER_REUSED", "CURRENCY_UNSUPPORTED",
+                       "PAYEE_CUMULATIVE_THRESHOLD"}
     info = {c.value for c in FindingCode if c.severity is Severity.INFO}
     assert info == {"REVISION", "SUPERSEDED_BY_REVISION", "NEAR_THRESHOLD", "CURRENCY_CONVERTED"}
 

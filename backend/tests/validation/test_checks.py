@@ -8,8 +8,8 @@ from acme.normalization.fx import convert_currency
 from acme.settings import get_settings
 from acme.validation import ValidationContext, detect_duplicate, fraud_score
 from acme.validation.checks import (
-    check_duplicate, check_integrity, check_items, check_prices, check_stock, check_vendor, fraud_signals,
-    reconcile_math,
+    check_duplicate, check_integrity, check_items, check_payee_threshold, check_prices, check_stock, check_vendor,
+    fraud_signals, reconcile_math,
 )
 from golden_invoices import GOLDEN, assessed, record_payment, record_processed
 
@@ -314,3 +314,66 @@ def test_weights_and_threshold_come_from_settings(ctx, golden, monkeypatch):
     get_settings.cache_clear()
     invoice = golden["invoice_1005.json"]
     assert C.FRAUD_SUSPECTED in codes(fraud_signals(invoice, assessed(ctx, invoice)))
+
+
+# --- cumulative payee threshold ---------------------------------------------------------
+
+def _payee_finding(invoice, conn):
+    return check_payee_threshold(invoice, ValidationContext.load(conn))
+
+
+def test_second_split_invoice(seeded_db, golden):
+    record_processed(seeded_db, golden["invoice_1018.txt"], "APPROVE", "r-1018")
+    [f] = _payee_finding(golden["invoice_1019.json"], seeded_db)
+    assert (f.code, f.severity, f.source) == (C.PAYEE_CUMULATIVE_THRESHOLD, Severity.WARNING, FindingSource.RULE)
+    assert (f.evidence["total"], f.evidence["threshold"], f.evidence["payees"]) == (
+        "19250.00", "10000.00", ["Northwind Fabrication LLC"])
+    assert f.evidence["window"] == {"days": 30, "start": "2026-02-02", "end": "2026-03-03"}
+    assert [(i["invoice_number"], i["invoice_date"], i["total"], i["outcome"], i["run_id"])
+            for i in f.evidence["invoices"]] == [("INV-1018", "2026-02-02", "9750.00", "APPROVE", "r-1018"),
+                                                 ("INV-1019", "2026-02-09", "9500.00", "Current", None)]
+    assert f.message == ("Payee total $19,250.00 over 2 invoices in 30 days (2026-02-02 to 2026-03-03) "
+                         "exceeds $10,000.00")
+
+
+def test_shared_address_across_vendor_names(seeded_db, golden):
+    record_processed(seeded_db, golden["invoice_1021.txt"], "APPROVE", "r-1021")
+    [f] = _payee_finding(golden["invoice_1022.json"], seeded_db)
+    assert f.evidence["total"] == "11250.00"
+    assert f.evidence["payees"] == ["Harbor Point Supply Co.", "HPS Industrial Partners"]
+    assert [i["invoice_number"] for i in f.evidence["invoices"]] == ["INV-1021", "INV-1022"]
+
+
+def test_single_large_invoice_is_left_to_the_vp_rules(seeded_db, golden):
+    assert _payee_finding(golden["invoice_1002.txt"], seeded_db) == []  # $15,000.00, alone
+
+
+def test_widgets_under_the_threshold(seeded_db, golden):
+    record_processed(seeded_db, golden["invoice_1001.txt"], "APPROVE", "r-1001")
+    ctx = ValidationContext.load(seeded_db)
+    assert ctx.payee_lookup(golden["invoice_1016.json"]).total == Decimal("8233.00")
+    assert check_payee_threshold(golden["invoice_1016.json"], ctx) == []
+
+
+def test_rejected_invoices_count(seeded_db, golden):
+    rejected = golden["invoice_1021.txt"].model_copy(update={"invoice_number": "INV-2001"})  # $6,000.00
+    record_processed(seeded_db, rejected, "REJECT", "r-2001")
+    new = golden["invoice_1001.txt"].model_copy(update={  # $5,000.00, same payee, 7 days later
+        "invoice_number": "INV-2002", "vendor_name": "Harbor Point Supply Co.", "invoice_date": date(2026, 2, 10)})
+    [f] = _payee_finding(new, seeded_db)
+    assert f.evidence["total"] == "11000.00" and f.evidence["invoices"][0]["outcome"] == "REJECT"
+
+
+def test_duplicate_is_skipped(seeded_db, golden):
+    record_processed(seeded_db, golden["invoice_1018.txt"], "APPROVE", "r-1018")
+    record_processed(seeded_db, golden["invoice_1019.json"], "NEEDS_REVIEW", "r-1019")
+    assert codes(check_duplicate(golden["invoice_1019.json"], ValidationContext.load(seeded_db))) == [C.DUPLICATE]
+    assert _payee_finding(golden["invoice_1019.json"], seeded_db) == []
+
+
+def test_split_invoicing_alone_does_not_trip_fraud(seeded_db, golden):
+    record_processed(seeded_db, golden["invoice_1018.txt"], "APPROVE", "r-1018")
+    invoice = golden["invoice_1019.json"]
+    ctx = assessed(ValidationContext.load(seeded_db), invoice)
+    assert fraud_score(invoice, ctx) == (0.35, ["near_threshold", "payee_cumulative"])
+    assert codes(fraud_signals(invoice, ctx)) == [C.NEAR_THRESHOLD]

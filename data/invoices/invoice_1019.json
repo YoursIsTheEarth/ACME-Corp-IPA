@@ -1,0 +1,21 @@
+{
+  "invoice_number": "INV-1019",
+  "vendor": {
+    "name": "Northwind Fabrication LLC",
+    "address": "2200 Industrial Pkwy, Columbus, OH 43215"
+  },
+  "date": "2026-02-09",
+  "due_date": "2026-03-11",
+  "line_items": [
+    {"item": "WidgetA", "quantity": 15, "unit_price": 250.00},
+    {"item": "WidgetB", "quantity": 10, "unit_price": 500.00},
+    {"item": "GadgetX", "quantity": 1, "unit_price": 750.00}
+  ],
+  "subtotal": 9500.00,
+  "tax_rate": 0.00,
+  "tax_amount": 0.00,
+  "total": 9500.00,
+  "currency": "USD",
+  "payment_terms": "Net 30",
+  "notes": "PO-NW-2026-014, shipment 2 of 3."
+}

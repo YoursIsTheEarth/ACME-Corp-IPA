@@ -128,3 +128,41 @@ CREATE TABLE IF NOT EXISTS admin_settings (
     updated_by  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
+
+-- Payee registry: one identity per payee, its normalized names/aliases and remit-to addresses, and a
+-- ledger of every invoice received for it (rejected and duplicate copies included).
+CREATE TABLE IF NOT EXISTS payees (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    canonical_name  TEXT NOT NULL,
+    source          TEXT NOT NULL CHECK (source IN ('seed', 'invoice')),
+    created_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS payee_names (
+    name_norm  TEXT NOT NULL,
+    payee_id   INTEGER NOT NULL REFERENCES payees(id),
+    PRIMARY KEY (name_norm, payee_id)
+);
+
+CREATE TABLE IF NOT EXISTS payee_addresses (
+    address_norm  TEXT NOT NULL,
+    payee_id      INTEGER NOT NULL REFERENCES payees(id),
+    address_raw   TEXT,
+    PRIMARY KEY (address_norm, payee_id)
+);
+
+CREATE TABLE IF NOT EXISTS payee_invoices (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    payee_id        INTEGER NOT NULL REFERENCES payees(id),
+    run_id          TEXT NOT NULL,
+    invoice_number  TEXT NOT NULL,
+    revision        INTEGER NOT NULL DEFAULT 0,
+    vendor_name     TEXT,
+    vendor_address  TEXT,
+    invoice_date    TEXT NOT NULL,  -- the invoice date, else the run's upload date
+    total_usd       TEXT NOT NULL,
+    outcome         TEXT,
+    recorded_at     TEXT NOT NULL,
+    UNIQUE (payee_id, run_id)
+);
+CREATE INDEX IF NOT EXISTS ix_payee_invoices_run ON payee_invoices (run_id);

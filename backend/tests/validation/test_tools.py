@@ -15,8 +15,9 @@ def tools(ctx, golden):
 
 def test_tool_names(tools):
     assert list(tools[0]) == TOOL_NAMES == [
-        "lookup_item", "check_stock", "reconcile_math", "check_integrity", "check_duplicate", "check_vendor",
-        "fraud_signals", "check_prices", "report_finding"]
+        "lookup_item", "check_stock", "reconcile_math", "check_integrity", "check_duplicate",
+        "check_payee_threshold", "check_vendor", "detect_prompt_injection", "fraud_signals", "check_prices",
+        "report_finding"]
 
 
 def test_check_tools_take_no_arguments(tools):

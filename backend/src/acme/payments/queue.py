@@ -4,7 +4,9 @@
     supersede_original(revision_invoice, run_id)      # every REVISION, whatever its outcome
     queue_payment(run_id, invoice, decision)          # APPROVE -> payment_queue row (never pays)
     record_rejection(run_id, decision, findings)      # REJECT -> Rejected or Duplicate + rejection log
-    enqueue_review(run_id, reason, kind)              # NEEDS_REVIEW, credit hold, payment failure
+    enqueue_review(run_id, reason, kind)              # NEEDS_REVIEW, credit hold, payment failure, payee threshold
+    record_payee_invoice(run_id, invoice, outcome)    # every outcome that has an invoice: the payee ledger
+    apply_payee_flags(run_id, finding)                # PAYEE_CUMULATIVE_THRESHOLD: flag the other contributors
 
 Each function opens its own connection unless `conn` is given.
 """
@@ -18,6 +20,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any, Literal
 
+from acme import payees
 from acme.db import connect
 from acme.logging import audit
 from acme.models import Decision, Finding, FindingCode, Invoice, Outcome
@@ -30,8 +33,10 @@ from acme.validation.context import ValidationContext, content_hash
 log = logging.getLogger(__name__)
 
 AGENT = "disposition"
-HoldKind = Literal["warning", "credit", "payment_failure"]
-HOLD_KINDS = ("warning", "credit", "payment_failure")
+HoldKind = Literal["warning", "credit", "payment_failure", "payee_threshold"]
+HOLD_KINDS = ("warning", "credit", "payment_failure", "payee_threshold")
+PAYEE_HOLD_REASON = "Payee cumulative threshold"
+PULLED = "pulled: payee cumulative threshold"
 
 
 @dataclass(frozen=True)
@@ -183,6 +188,7 @@ def _insert_row(c: sqlite3.Connection, run_id: str, invoice: Invoice, decision: 
         c.execute("UPDATE invoice_runs SET status = 'Queued for payment', stage = 'Queued for payment', "
                   "final_status = NULL, decided_by = COALESCE(?, decided_by) WHERE id = ?",
                   (decision.decided_by, run_id))
+        payees.set_outcome(c, run_id, "Queued for payment")
     data = {"row_id": row_id, "run_id": run_id, "invoice_number": invoice.invoice_number, "kind": kind,
             "amount_usd": money(amount), "vendor": invoice.vendor_name}
     audit(run_id, AGENT, "payment.queued", data, conn=c)
@@ -271,7 +277,8 @@ def enqueue_review(run_id: str, reason: str, kind: HoldKind, details: dict[str, 
                    conn: sqlite3.Connection | None = None) -> None:
     """Hold a run in Elevated Review: status Awaiting review plus a `review.enqueued` event with the reason.
 
-    Kinds: `warning` (NEEDS_REVIEW), `credit` (revision lowers a paid total), `payment_failure`.
+    Kinds: `warning` (NEEDS_REVIEW), `credit` (revision lowers a paid total), `payment_failure`, and
+    `payee_threshold` (an approved payment pulled from the queue by `apply_payee_flags`).
     Pausing the graph is the workflow's job; this only records the hold.
     """
     if kind not in HOLD_KINDS:
@@ -280,6 +287,7 @@ def enqueue_review(run_id: str, reason: str, kind: HoldKind, details: dict[str, 
         with immediate(c):
             c.execute("UPDATE invoice_runs SET status = 'Awaiting review', stage = 'Awaiting review', "
                       "final_status = NULL, completed_at = NULL WHERE id = ?", (run_id,))
+            payees.set_outcome(c, run_id, "Awaiting review")
         audit(run_id, AGENT, "review.enqueued", {"kind": kind, "reason": reason, "details": details or {}}, conn=c)
 
 
@@ -292,3 +300,77 @@ def review_hold(run_id: str, conn: sqlite3.Connection | None = None) -> ReviewHo
         return None
     payload = json.loads(row["payload_json"])
     return ReviewHold(payload["kind"], payload["reason"], payload.get("details") or {})
+
+
+# --- payee registry (design D4, D6) ------------------------------------------------------------
+
+def record_payee_invoice(run_id: str, invoice: Invoice, outcome: Outcome | str,
+                         conn: sqlite3.Connection | None = None) -> list[int]:
+    """Record the run's invoice in the payee ledger (every outcome, duplicates included); returns its payees."""
+    with _connection(conn) as c:
+        return payees.record_invoice(c, run_id, invoice, str(outcome))
+
+
+def payee_threshold_details(run_id: str, finding: Finding) -> dict[str, Any]:
+    """A `PAYEE_CUMULATIVE_THRESHOLD` finding as hold details: the total, window, and contributing invoices,
+    with the triggering run (`run_id`, the invoice under validation) filled in."""
+    evidence = finding.evidence
+    return {"message": finding.message, "total": evidence.get("total"), "threshold": evidence.get("threshold"),
+            "window": evidence.get("window"), "payees": evidence.get("payees", []), "triggered_by": run_id,
+            "invoices": [{**m, "run_id": m.get("run_id") or run_id} for m in evidence.get("invoices", [])]}
+
+
+def apply_payee_flags(run_id: str, finding: Finding, conn: sqlite3.Connection | None = None) -> list[str]:
+    """Flag every other invoice contributing to `run_id`'s `PAYEE_CUMULATIVE_THRESHOLD` finding (design D6).
+
+    Under the batch lock: a `queued` or `failed` payment row is cancelled and the run held in Elevated Review
+    (`payee_threshold`); a run already Awaiting review gets the finding and the latest total added to its
+    hold; any other run (paid, rejected, superseded, ...) gets a `finding.retroactive` audit entry and keeps
+    its status. Returns the run ids pulled from the Payment Queue.
+    """
+    details = payee_threshold_details(run_id, finding)
+    flagged = Finding(code=finding.code, severity=finding.severity, message=finding.message,
+                      evidence={**finding.evidence, "invoices": details["invoices"]}, source=finding.source)
+    trigger = next((m["invoice_number"] for m in details["invoices"] if m["run_id"] == run_id), None)
+    others = list(dict.fromkeys(m["run_id"] for m in details["invoices"] if m["run_id"] != run_id))
+    pulled, cancelled = [], []
+    with _connection(conn) as c, _batch_lock_wait() as acquired:
+        if not acquired:  # a row still `paying` is left to its batch and flagged like a paid one
+            log.warning("payee_flags_lock_timeout", extra={"data": {"run_id": run_id}})
+        for other in others:
+            run = c.execute("SELECT status FROM invoice_runs WHERE id = ?", (other,)).fetchone()
+            if run is None:
+                continue
+            with immediate(c):
+                rows = c.execute("SELECT * FROM payment_queue WHERE run_id = ? AND status IN ('queued', 'failed') "
+                                 "ORDER BY id", (other,)).fetchall()
+                for row in rows:
+                    c.execute("UPDATE payment_queue SET status = 'cancelled', last_error = ? WHERE id = ?",
+                              (PULLED, row["id"]))
+            if rows:
+                last = rows[-1]
+                enqueue_review(other, PAYEE_HOLD_REASON, "payee_threshold", {
+                    "findings": [finding.code], "payee_threshold": details, "pulled": True, "row_id": last["id"],
+                    "amount_usd": last["amount_usd"], "ai_recommendation": Outcome.APPROVE,
+                    "ai_rationale": f"Approved and queued before {trigger} crossed the payee threshold; "
+                                    "pulled from the Payment Queue for review.",
+                }, conn=c)
+                cancelled += [(row["id"], other) for row in rows]
+                pulled.append(other)
+            elif run["status"] == "Awaiting review":
+                hold = review_hold(other, conn=c)
+                held = dict(hold.details) if hold else {}
+                reason = hold.reason if hold else PAYEE_HOLD_REASON
+                if previous := (held.get("payee_threshold") or {}).get("message"):
+                    reason = reason.replace(previous, finding.message)  # the latest total in the reason too
+                held["findings"] = list(dict.fromkeys([*held.get("findings", []), finding.code]))
+                held["payee_threshold"] = details
+                audit(other, AGENT, "review.enqueued", {"kind": hold.kind if hold else "warning", "reason": reason,
+                                                        "details": held, "update": True}, conn=c)
+            else:
+                audit(other, AGENT, "finding.retroactive", {
+                    "finding": flagged, "triggered_by": {"run_id": run_id, "invoice_number": trigger},
+                    "total": details["total"], "status": run["status"]}, conn=c)
+    for row_id, other in cancelled:
+        events.emit("payment.cancelled", {"row_id": row_id, "run_id": other, "reason": "payee_threshold"})
+    return pulled

@@ -52,7 +52,7 @@ def conn(tmp_path):
 
 @pytest.fixture(scope="session")
 def api_golden(tmp_path_factory):
-    """All 20 golden files uploaded in sorted order through the API, then Pay all. Returns plain data."""
+    """All 26 golden files uploaded in sorted order through the API, then Pay all. Returns plain data."""
     workdir = tmp_path_factory.mktemp("api_golden")
     with pytest.MonkeyPatch.context() as mp:
         mp.chdir(workdir)

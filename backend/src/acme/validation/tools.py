@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from acme.logging import dumps
 from acme.models import Finding, FindingCode, FindingSource, Invoice, RevisionContext, Severity
 from acme.validation import checks
+from acme.validation.codes import for_prompt
 from acme.validation.context import ValidationContext
 
 DESCRIPTIONS = {
@@ -27,10 +28,14 @@ DESCRIPTIONS = {
                        "DUE_BEFORE_INVOICE_DATE).",
     "check_duplicate": "Compare with previously processed invoices (DUPLICATE, REVISION, REVISION_CREDIT_DUE, "
                        "INVOICE_NUMBER_REUSED).",
+    "check_payee_threshold": "Total the payee's invoices (by vendor name, alias, or remit-to address) over a "
+                             "rolling window; over the limit is PAYEE_CUMULATIVE_THRESHOLD.",
     "check_vendor": "Check the vendor against the approved vendor list by name and alias (UNKNOWN_VENDOR).",
+    "detect_prompt_injection": "Scan the document text for instructions aimed at the agents "
+                               "(PROMPT_INJECTION_SUSPECTED).",
     "fraud_signals": "Score fraud signals: urgency, wire transfer, immediate terms, relative due date, unknown "
-                     "vendor, suspicious address, near threshold (SUSPICIOUS_ADDRESS, NEAR_THRESHOLD, "
-                     "FRAUD_SUSPECTED).",
+                     "vendor, suspicious address, near threshold, payee cumulative total, prompt injection "
+                     "(SUSPICIOUS_ADDRESS, NEAR_THRESHOLD, FRAUD_SUSPECTED).",
     "check_prices": "Compare each USD unit price with the reference price; more than 10% off is PRICE_VARIANCE.",
 }
 REPORT_FINDING = "report_finding"
@@ -74,7 +79,8 @@ def run_check(name: str, invoice: Invoice, ctx: ValidationContext, run: ToolRun)
 
 
 def _result(findings: list[Finding]) -> str:
-    return dumps([f.model_dump(mode="json", include={"code", "severity", "message", "evidence"}) for f in findings])
+    return dumps([for_prompt(f).model_dump(mode="json", include={"code", "severity", "message", "evidence"})
+                  for f in findings])
 
 
 def build_tools(invoice: Invoice, ctx: ValidationContext, run: ToolRun) -> list[BaseTool]:

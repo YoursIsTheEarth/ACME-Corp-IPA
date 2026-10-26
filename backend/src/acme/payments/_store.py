@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
+from acme.payees import set_outcome
 from acme.validation.context import normalize_name
 
 # One batch at a time per process (design D2). Disposition also takes it to read a `paying` original.
@@ -41,9 +42,11 @@ def row_key(row: sqlite3.Row) -> str:
 
 
 def resolve_run(conn: sqlite3.Connection, run_id: str, final_status: str, decided_by: str | None = None) -> None:
-    """Mark a run resolved with `final_status` (keeps an earlier `decided_by` when none is given)."""
+    """Mark a run resolved with `final_status` (keeps an earlier `decided_by` when none is given), in the payee
+    ledger too."""
     conn.execute(
         "UPDATE invoice_runs SET status = 'Resolved', stage = 'Resolved', final_status = ?, "
         "decided_by = COALESCE(?, decided_by), completed_at = ? WHERE id = ?",
         (final_status, decided_by, utcnow(), run_id),
     )
+    set_outcome(conn, run_id, final_status)

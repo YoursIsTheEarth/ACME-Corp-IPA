@@ -1,0 +1,19 @@
+{
+  "invoice_number": "INV-1022",
+  "vendor": {
+    "name": "HPS Industrial Partners",
+    "address": "88 Harbor View Road, Unit 4, Tacoma, WA 98402"
+  },
+  "date": "2026-02-10",
+  "due_date": "2026-03-12",
+  "line_items": [
+    {"item": "GadgetX", "quantity": 5, "unit_price": 750.00},
+    {"item": "WidgetA", "quantity": 6, "unit_price": 250.00}
+  ],
+  "subtotal": 5250.00,
+  "tax_rate": 0.00,
+  "tax_amount": 0.00,
+  "total": 5250.00,
+  "currency": "USD",
+  "payment_terms": "Net 30"
+}

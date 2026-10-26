@@ -21,7 +21,7 @@ Gives operators and reviewers a terminal entry point to process invoice files, d
 
 #### Scenario: Batch the provided invoices
 - **WHEN** a user with an LLM key configured runs `python main.py --batch data/invoices`
-- **THEN** 20 runs are created in sorted filename order and the results table lists all 20 with their outcomes
+- **THEN** 26 runs are created in sorted filename order and the results table lists all 26 with their outcomes
 
 ### Requirement: Machine-readable output
 `--json` SHALL print one JSON object per run (run_id, file, invoice_number, vendor, total_usd, outcome, findings with code and severity, decided_by) instead of the formatted output, with logs kept off stdout.
@@ -35,7 +35,7 @@ Gives operators and reviewers a terminal entry point to process invoice files, d
 
 #### Scenario: Process and pay
 - **WHEN** payment delay is on and a user with an LLM key configured runs `python main.py --batch data/invoices --pay`
-- **THEN** after all 20 runs finish a single batch pays 7 rows, and the summary prints the total paid
+- **THEN** after all 26 runs finish a single batch pays 7 rows, and the summary prints the total paid
 
 #### Scenario: Process and pay with delay off
 - **WHEN** payment delay is off and a user with an LLM key configured runs `python main.py --batch data/invoices --pay`
@@ -84,11 +84,11 @@ After a `--batch` run, the CLI SHALL print and write `reports/summary.md` with c
 
 #### Scenario: Summary after golden batch with pay
 - **WHEN** payment delay is on and `python main.py --batch data/invoices --pay` finishes with an LLM key configured
-- **THEN** `reports/summary.md` shows 7 paid, 1 superseded, 1 held, 11 rejected, and 3 duplicates caught
+- **THEN** `reports/summary.md` shows 7 paid, 1 superseded, 6 held, 12 rejected, and 3 duplicates caught
 
 #### Scenario: Summary after golden batch with delay off
 - **WHEN** payment delay is off and `python main.py --batch data/invoices` finishes with an LLM key configured
-- **THEN** `reports/summary.md` shows 7 paid, 1 revised, 0 superseded, 1 held, 11 rejected, 3 duplicates caught, and $37,620.00 paid
+- **THEN** `reports/summary.md` shows 9 paid, 1 revised, 0 superseded, 4 held, 12 rejected, 3 duplicates caught, and $53,370.00 paid
 
 ### Requirement: Provider override without offline
 `--provider grok|claude` SHALL override the configured LLM provider for that command only. Any other value, including `offline`, SHALL be rejected before any run starts with a message naming `grok` and `claude` as the valid values.

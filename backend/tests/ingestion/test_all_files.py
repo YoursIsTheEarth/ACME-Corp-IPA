@@ -1,4 +1,4 @@
-"""Integration: ingest() then normalize() over all 20 sample files with the test fake model (task 6.1)."""
+"""Integration: ingest() then normalize() over all 26 sample files with the test fake model (task 6.1)."""
 
 from pathlib import Path
 
@@ -25,7 +25,7 @@ def outcomes(seeded_db):
 
 
 def test_every_file_yields_an_invoice_or_extraction_failed(outcomes):
-    assert len(outcomes) == 20
+    assert len(outcomes) == 26
     for name, (invoice, findings) in outcomes.items():
         assert isinstance(invoice, Invoice) or [f.code for f in findings] == [FindingCode.EXTRACTION_FAILED], name
 

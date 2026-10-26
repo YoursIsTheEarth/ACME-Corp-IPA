@@ -48,7 +48,30 @@ export interface AuditRow extends RunRow {
   findings_count: number;
 }
 
-export type HoldKind = 'warning' | 'credit' | 'payment_failure';
+export type HoldKind = 'warning' | 'credit' | 'payment_failure' | 'payee_threshold';
+
+/** One invoice counted in a payee total; `status` is its current run status. */
+export interface PayeeInvoice {
+  run_id: string | null;
+  invoice_number: string;
+  invoice_date: string;
+  vendor: string | null;
+  amount_usd: Money | null;
+  status: string | null;
+}
+
+/** Why a payee threshold hold exists: the rolling payee total and the invoices in it. */
+export interface PayeeThreshold {
+  total_usd: Money | null;
+  threshold_usd: Money | null;
+  window_days: number | null;
+  window_start: string | null;
+  window_end: string | null;
+  payees: string[];
+  message: string | null;
+  triggered_by: string | null;
+  invoices: PayeeInvoice[];
+}
 
 export interface ReviewRow extends RunRow {
   hold_kind: HoldKind | null;
@@ -61,6 +84,10 @@ export interface ReviewRow extends RunRow {
   ai_rationale: string | null;
   overpaid_usd: Money | null;
   paid_amount_usd: Money | null;
+  /** Set when the cumulative payee threshold is (one of) the reasons for the hold. */
+  payee_threshold: PayeeThreshold | null;
+  /** An approved payment pulled from the Payment Queue into review. */
+  pulled: boolean;
   waiting_since: string | null;
   waiting_s: number | null;
 }

@@ -11,7 +11,7 @@ from golden_invoices import GOLDEN_FILES
 INVOICES = Path(__file__).resolve().parents[3] / "data" / "invoices"
 
 
-def test_fixture_covers_all_20_files(golden):
+def test_fixture_covers_all_26_files(golden):
     assert sorted(golden) == GOLDEN_FILES == sorted(p.name for p in INVOICES.iterdir())
 
 

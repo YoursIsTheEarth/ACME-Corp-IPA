@@ -40,7 +40,7 @@ def apply_policy(
     revision_ctx: RevisionContext | None = None,
 ) -> PolicyResult:
     critical = _codes(findings, Severity.CRITICAL)
-    fraud = FindingCode.FRAUD_SUSPECTED in critical
+    fraud = FindingCode.FRAUD_SUSPECTED in critical or FindingCode.PROMPT_INJECTION_SUSPECTED in critical
     if critical:
         return PolicyResult(Outcome.REJECT, tuple(f"CRITICAL_{code}" for code in critical), fraud, False)
 

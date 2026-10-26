@@ -1,4 +1,4 @@
-"""Task 7.1: ingest -> normalize -> validate -> approve, with the test fake model, over all 20 files in sorted order."""
+"""Task 7.1: ingest -> normalize -> validate -> approve, with the test fake model, over all 26 files in sorted order."""
 
 from pathlib import Path
 
@@ -32,8 +32,8 @@ def test_floor_and_final_outcomes(results):
     floors = {name: floor.value for name, (floor, _) in results.items()}
     finals = {name: state.decision.outcome.value for name, (_, state) in results.items()}
     assert floors == finals == EXPECTED_OUTCOME
-    assert list(finals.values()).count("REJECT") == 11
-    assert list(finals.values()).count("NEEDS_REVIEW") == 1
+    assert list(finals.values()).count("REJECT") == 12
+    assert list(finals.values()).count("NEEDS_REVIEW") == 4
 
 
 def test_key_finding_codes(results):

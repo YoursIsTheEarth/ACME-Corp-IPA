@@ -32,6 +32,10 @@ TABLES = (
     "payment_queue",
     "payment_batches",
     "admin_settings",
+    "payees",
+    "payee_names",
+    "payee_addresses",
+    "payee_invoices",
 )
 
 

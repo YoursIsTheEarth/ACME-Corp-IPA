@@ -24,8 +24,10 @@ def test_catalog_defaults(monkeypatch):
     assert s.price_variance_pct == Decimal("10")
     assert s.near_threshold_floor_usd == Decimal("9500.00")
     assert s.fraud_signal_weights["suspicious_address"] == 0.30
-    assert sum(s.fraud_signal_weights.values()) == pytest.approx(1.40)
+    assert (s.fraud_signal_weights["payee_cumulative"], s.fraud_signal_weights["prompt_injection"]) == (0.25, 0.60)
+    assert sum(s.fraud_signal_weights.values()) == pytest.approx(2.25)
     assert s.fraud_threshold == 0.60
+    assert (s.payee_window_days, s.payee_cumulative_threshold_usd) == (30, Decimal("10000.00"))
     assert s.vp_review_threshold_usd == Decimal("10000.00")
     assert (s.critic_max_rounds, s.extraction_max_retries, s.validation_max_tool_rounds) == (2, 2, 8)
     assert (s.payment_idle_delay_s, s.payment_max_attempts, s.payment_lock_timeout_s) == (60, 3, 30)

@@ -3,8 +3,9 @@
     ctx = ValidationContext.load(conn)
 
 Snapshots `inventory`, `vendors`, `processed_invoices` (with the original's total from
-`invoice_runs.total_usd`), and `payments`. Validation never writes to these tables.
-`run_validation` adds the LLM's `address_assessment` for the invoice under validation.
+`invoice_runs.total_usd`), `payments`, and the payee registry (read through `payee_lookup`).
+Validation never writes to these tables. `run_validation` adds the document's `raw_text` and the
+LLM's `address_assessment` for the invoice under validation.
 
 Contract for the writer of `processed_invoices` (disposition): store
 `vendor = ctx.vendor_key(invoice.vendor_name)` and `content_hash = content_hash(invoice)`,
@@ -17,12 +18,13 @@ import sqlite3
 from dataclasses import dataclass
 from decimal import Decimal
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Mapping
+from typing import TYPE_CHECKING, Callable, Mapping
 
 from acme.db import connect
 from acme.models import Invoice
 
 if TYPE_CHECKING:
+    from acme.payees import PayeeTotal
     from acme.validation.address import AddressAssessment
 
 
@@ -63,9 +65,13 @@ class ValidationContext:
     processed: tuple[ProcessedInvoice, ...]
     payments: tuple[Payment, ...]
     address_assessment: "AddressAssessment | None" = None  # set per invoice by run_validation
+    raw_text: str | None = None  # the document text, set per invoice by run_validation
+    payee_lookup: "Callable[[Invoice], PayeeTotal | None] | None" = None  # rolling payee total (read-only)
 
     @classmethod
     def load(cls, conn: sqlite3.Connection | None = None) -> "ValidationContext":
+        from acme.payees import PayeeSnapshot  # acme.payees imports this module
+
         own = conn is None
         conn = conn or connect()
         try:
@@ -90,10 +96,12 @@ class ValidationContext:
                 Payment(r["idempotency_key"], r["vendor"], Decimal(r["amount_usd"]))
                 for r in conn.execute("SELECT idempotency_key, vendor, amount_usd FROM payments ORDER BY id")
             )
+            payees = PayeeSnapshot.load(conn)
         finally:
             if own:
                 conn.close()
-        return cls(MappingProxyType(inventory), MappingProxyType(vendors), processed, payments)
+        return cls(MappingProxyType(inventory), MappingProxyType(vendors), processed, payments,
+                   payee_lookup=payees.lookup)
 
     def approved_vendor(self, name: str | None) -> str | None:
         """Canonical approved vendor name matched by name or alias, else None."""

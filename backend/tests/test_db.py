@@ -25,7 +25,7 @@ def test_schema_created_on_missing_file(tmp_path):
     init_schema(conn)
     assert path.exists()
     assert set(TABLES) <= _tables(conn)
-    assert len(TABLES) == 12
+    assert len(TABLES) == 16 and len(_tables(conn) & set(TABLES)) == 16
     columns = {r["name"] for r in conn.execute("PRAGMA table_info(payment_queue)")}
     assert columns >= {"id", "run_id", "invoice_number", "revision", "vendor", "amount_usd", "kind",
                        "status", "attempts", "last_error", "queued_at", "batch_id"}
@@ -79,6 +79,24 @@ def test_init_schema_upgrades_an_old_database(tmp_path):
     conn.close()
 
 
+def test_init_schema_adds_payee_tables_to_an_older_database(tmp_path):
+    schema = files("acme.db").joinpath("schema.sql").read_text(encoding="utf-8")
+    conn = connect(tmp_path / "older.db")
+    conn.executescript(schema[:schema.index("-- Payee registry")])
+    conn.execute("INSERT INTO audit_log (run_id, ts, event) VALUES ('r-1', '2026-01-01', 'e')")
+    conn.execute("INSERT INTO invoice_runs (id, file_name, uploaded_at, status) "
+                 "VALUES ('r-1', 'a.txt', 'x', 'Uploaded')")
+    conn.commit()
+    payee_tables = {"payees", "payee_names", "payee_addresses", "payee_invoices"}
+    assert not payee_tables & _tables(conn)
+    init_schema(conn)
+    assert payee_tables <= _tables(conn)
+    for table in ("audit_log", "invoice_runs"):
+        assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 1
+    init_schema(conn)  # repeatable
+    conn.close()
+
+
 def test_fresh_schema_accepts_immediate_and_rejects_unknown_triggers(db):
     sql = "INSERT INTO payment_batches (batch_id, trigger, released_by, started_at) VALUES (?, ?, 'System', 'x')"
     db.execute(sql, ("B-0001", "immediate"))
@@ -121,7 +139,7 @@ def test_seed_repeatable_and_keeps_run_data(db):
     db.execute("UPDATE inventory SET stock = 99 WHERE item = 'WidgetA'")
     db.commit()
     seed(db)
-    for table, expected in (("inventory", 4), ("item_aliases", 7), ("vendors", 12), ("audit_log", 1)):
+    for table, expected in (("inventory", 4), ("item_aliases", 7), ("vendors", 15), ("audit_log", 1)):
         assert db.execute(f"SELECT count(*) FROM {table}").fetchone()[0] == expected
     assert db.execute("SELECT stock FROM inventory WHERE item='WidgetA'").fetchone()[0] == 15
 
@@ -142,6 +160,10 @@ def test_vendor_seed(db):
     assert _vendor_for(db, "Atlas Industrial Supply") == "Atlas Industrial Supply"
     assert _vendor_for(db, "NoProd Industries") is None
     assert _vendor_for(db, "Fraudster LLC") is None
+    assert _vendor_for(db, "Apex Procurement Services") is None
+    for name in ("Northwind Fabrication LLC", "Harbor Point Supply Co.", "HPS Industrial Partners"):
+        assert _vendor_for(db, name) == name  # split-invoicing fixture vendors look legitimate
+    assert _vendor_for(db, "Northwind Fabrication, LLC") == "Northwind Fabrication LLC"  # INV-1020's spelling
     assert json.loads(db.execute("SELECT aliases FROM vendors WHERE name='Widgets Inc.'").fetchone()[0]) == []
 
 

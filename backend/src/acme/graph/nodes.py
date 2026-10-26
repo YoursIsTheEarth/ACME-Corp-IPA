@@ -5,6 +5,7 @@ writes happen only in `disposition`, through the payment-processing disposition 
 The graph never calls `mock_payment`.
 """
 
+import dataclasses
 import json
 import logging
 from collections.abc import Callable
@@ -20,7 +21,7 @@ from acme.db import connect
 from acme.graph.state import WorkflowState
 from acme.ingestion import ExtractedInvoice, ingest
 from acme.logging import audit, dumps, read_trace
-from acme.models import Decision, FindingCode, Outcome, Severity
+from acme.models import Decision, Finding, FindingCode, Outcome, Severity
 from acme.normalization import normalize
 from acme.payments._store import immediate, resolve_run
 from acme.payments.revisions import money
@@ -111,7 +112,7 @@ def validate_node(state: WorkflowState) -> dict[str, Any]:
         return {"findings": new.findings, "revision_context": new.revision_context, "trace": new.trace}
     except Exception as exc:  # provider outage etc.: handoff rule 2 still holds without the LLM
         log.exception("validation_agent_failed")
-        ctx = ValidationContext.load()
+        ctx = dataclasses.replace(ValidationContext.load(), raw_text=state.raw_text)
         _, revision_ctx = detect_duplicate(state.invoice, ctx)
         findings = dedupe([*state.findings, *run_checks(state.invoice, ctx)])
         return {"findings": findings, "revision_context": revision_ctx,
@@ -146,6 +147,10 @@ def _no_invoice_decision(state: WorkflowState) -> Decision:
                     rules_applied=list(policy.rules), decided_by=AUTO)
 
 
+def _payee_finding(state: WorkflowState) -> Finding | None:
+    return next((f for f in state.findings if f.code == FindingCode.PAYEE_CUMULATIVE_THRESHOLD), None)
+
+
 def _hold(state: WorkflowState, decision: Decision) -> dict[str, Any]:
     invoice, draft = state.invoice, state.decision_draft
     held = [f for f in state.findings if f.severity != Severity.INFO]
@@ -154,6 +159,8 @@ def _hold(state: WorkflowState, decision: Decision) -> dict[str, Any]:
         "ai_recommendation": (draft or decision).outcome,
         "ai_rationale": (draft or decision).rationale,
     }
+    if (payee := _payee_finding(state)) is not None:
+        details["payee_threshold"] = payments.payee_threshold_details(state.run_id, payee)
     if REVISION_PAID_LOWER in decision.rules_applied:
         kind = "credit"
         paid = state.revision_context.paid_amount
@@ -185,15 +192,19 @@ def _credit_confirmed(run_id: str, decided_by: str | None) -> None:
 
 
 def disposition_node(state: WorkflowState) -> dict[str, Any]:
-    """The only exit: record the invoice, supersede an unpaid original, then queue / reject / hold.
+    """The only exit: record the invoice (and in the payee ledger), supersede an unpaid original, then
+    queue / reject / hold.
 
     With payment delay off, a queued row is then paid by an `immediate` batch before the run finishes.
+    On the first disposition of a run with `PAYEE_CUMULATIVE_THRESHOLD`, the other contributing invoices are
+    flagged before the run finishes (queued ones are pulled into review).
     """
     run_id, invoice = state.run_id, state.invoice
     decision = state.decision or _no_invoice_decision(state)
     result: dict[str, Any] = {"held": False}
     if invoice is not None:
         payments.record_processed(run_id, invoice, decision.outcome)
+        payments.record_payee_invoice(run_id, invoice, decision.outcome)
         if any(f.code == FindingCode.REVISION for f in state.findings):
             result["superseded"] = payments.supersede_original(invoice, run_id)
 
@@ -213,6 +224,12 @@ def disposition_node(state: WorkflowState) -> dict[str, Any]:
                 result["batch_id"] = paid.batch_id
         if queued.action == "held":
             result |= {"held": True, "hold_kind": payments.review_hold(run_id).kind}
+
+    payee = _payee_finding(state)
+    if payee is not None and state.hold_kind is None:  # a reviewer's decision does not flag them again
+        result["pulled"] = payments.apply_payee_flags(run_id, payee)
+        for pulled in result["pulled"]:
+            emit("invoice.stage_changed", {"run_id": pulled, "stage": "Awaiting review", "status": "Awaiting review"})
 
     status, final_status = _run_status(run_id)
     result |= {"status": status, "final_status": final_status}

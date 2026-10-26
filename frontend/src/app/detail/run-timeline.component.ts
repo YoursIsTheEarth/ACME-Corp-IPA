@@ -101,10 +101,22 @@ export function describe(entry: TimelineEntry): TimelineItem {
       item.title = `Decision: ${p['decision']?.outcome ?? ''}`;
       item.lines = [text(p['decision']?.rationale)];
       break;
-    case 'review.enqueued':
-      item.title = 'Held for a person';
+    case 'review.enqueued': {
+      const payee = p['details']?.['payee_threshold'];
+      item.title = p['update'] ? 'Hold updated' : 'Held for a person';
       item.lines = [text(p['reason'])];
+      if (payee) item.lines.push(`Payee total ${usd(payee['total'])}: ${(payee['invoices'] ?? []).map((i: any) => i.invoice_number).join(', ')}`);
       break;
+    }
+    case 'finding.retroactive': {
+      const trigger = p['triggered_by'] ?? {};
+      item.title = 'Flagged after resolution';
+      item.lines = [
+        `${findingLabel(p['finding']?.code)}: payee total ${usd(p['total'])}, raised by ${trigger['invoice_number'] ?? trigger['run_id'] ?? 'a later invoice'}`,
+        text(p['finding']?.message),
+      ];
+      break;
+    }
     case 'disposition.outcome':
       item.title = `Outcome: ${p['final_status'] ?? p['status'] ?? p['outcome']}`;
       item.lines = [`Decided by ${p['decided_by'] ?? '—'}`];

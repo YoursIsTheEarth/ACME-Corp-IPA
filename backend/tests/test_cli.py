@@ -97,8 +97,8 @@ def test_batch_with_delay_off_pays_as_it_goes(capsys):
     assert "-> APPROVE (Revised, payment PAY-000003)" in out  # INV-1004 R1 delta
     assert "Nothing is queued for payment; no payments made." in out
     summary = Path("reports/summary.md").read_text()
-    for row in ("| Paid | 7 |", "| Revised | 1 |", "| Superseded | 0 |", "| Held for review | 1 |",
-                "| Rejected | 11 |", "| Duplicates caught | 3 |", "| Paid | $37,620.00 |"):
+    for row in ("| Paid | 9 |", "| Revised | 1 |", "| Superseded | 0 |", "| Held for review | 4 |",
+                "| Rejected | 12 |", "| Duplicates caught | 3 |", "| Paid | $53,370.00 |"):
         assert row in summary, row
     assert main(["payments", "run"]) == 0
     assert "Nothing is queued for payment" in capsys.readouterr().out

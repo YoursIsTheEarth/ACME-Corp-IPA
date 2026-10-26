@@ -28,7 +28,8 @@ REJECTED_STATUSES = ("Rejected", "Duplicate")
 SEVERITY_RANK = {"CRITICAL": 0, "WARNING": 1, "INFO": 2}
 KEY_FINDINGS = 3
 FINDING_EVENTS = ("validation.findings", "validation.fallback", "rejection.recorded", "invoice.superseded",
-                  "extraction_attempt")
+                  "finding.retroactive", "extraction_attempt")
+PAYEE_CODE = "PAYEE_CUMULATIVE_THRESHOLD"
 TRIGGER_LABELS = {"end_of_day": "End of day", "idle": "Invoice Queue idle", "immediate": "Immediate (at approval)",
                   "pay_all": "Pay all", "pay_selected": "Pay selected", "pay_now": "Pay now"}
 CONTENT_TYPES = {".pdf": "application/pdf", ".txt": "text/plain", ".csv": "text/csv",
@@ -97,7 +98,7 @@ def _in_range(day: date | None, date_from: date | None, date_to: date | None) ->
 
 def _run_facts(conn: sqlite3.Connection, run_ids: list[str]) -> dict[str, dict[str, Any]]:
     """Findings, last activity, and extraction retries per run, read from `audit_log` in two queries."""
-    facts: dict[str, dict[str, Any]] = {rid: {"validation": [], "rejection": [], "superseded": [],
+    facts: dict[str, dict[str, Any]] = {rid: {"validation": [], "rejection": [], "superseded": [], "retroactive": [],
                                               "failed_attempts": 0, "last_ts": None} for rid in run_ids}
     if not run_ids:
         return facts
@@ -115,6 +116,8 @@ def _run_facts(conn: sqlite3.Connection, run_ids: list[str]) -> dict[str, dict[s
             fact["rejection"] = payload["findings"]
         elif row["event"] == "invoice.superseded" and payload.get("finding"):
             fact["superseded"].append(payload["finding"])
+        elif row["event"] == "finding.retroactive" and payload.get("finding"):
+            fact["retroactive"].append(payload["finding"])
         elif row["event"] == "extraction_attempt" and payload.get("outcome") != "accepted":
             fact["failed_attempts"] += 1
     return facts
@@ -126,9 +129,10 @@ def _finding(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def _findings(fact: dict[str, Any]) -> list[dict[str, Any]]:
-    """The run's findings: the rejection log's list (a superset) else validation's, plus supersede notes."""
+    """The run's findings: the rejection log's list (a superset) else validation's, plus supersede notes and
+    the latest retroactive payee threshold flag."""
     seen, result = set(), []
-    for raw in [*(fact["rejection"] or fact["validation"]), *fact["superseded"]]:
+    for raw in [*(fact["rejection"] or fact["validation"]), *fact["superseded"], *fact["retroactive"][-1:]]:
         finding = _finding(raw)
         key = (finding["code"], finding["message"])
         if key not in seen:
@@ -206,8 +210,31 @@ def audit_view(conn: sqlite3.Connection, status: str | None = None, date_from: d
     return result
 
 
+def _payee_threshold(conn: sqlite3.Connection, held: dict[str, Any] | None) -> dict[str, Any] | None:
+    """A hold's payee total, window, and contributing invoices with their current status."""
+    if not held:
+        return None
+    invoices = held.get("invoices") or []
+    ids = [i["run_id"] for i in invoices if i.get("run_id")]
+    runs = {r["id"]: r for r in conn.execute(f"SELECT id, status, final_status FROM invoice_runs WHERE id IN "
+                                             f"({_marks(ids)})", ids)} if ids else {}
+    window = held.get("window") or {}
+    return {
+        "total_usd": _money(held.get("total")), "threshold_usd": _money(held.get("threshold")),
+        "window_days": window.get("days"), "window_start": window.get("start"), "window_end": window.get("end"),
+        "payees": held.get("payees") or [], "message": held.get("message"), "triggered_by": held.get("triggered_by"),
+        "invoices": [{
+            "run_id": i.get("run_id"), "invoice_number": i.get("invoice_number"), "invoice_date": i.get("invoice_date"),
+            "vendor": i.get("vendor_name"), "amount_usd": _money(i.get("total")),
+            "status": (runs[i["run_id"]]["final_status"] or runs[i["run_id"]]["status"]) if i.get("run_id") in runs
+            else i.get("outcome"),
+        } for i in invoices],
+    }
+
+
 def review_view(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    """Runs paused for a person, with why each is held and the AI recommendation (F25)."""
+    """Runs paused for a person, with why each is held and the AI recommendation (F25). Payee threshold holds
+    (and any hold the threshold reached) carry the payee total and contributing invoices."""
     reviews = workflow.list_reviews()
     ids = [r["run_id"] for r in reviews]
     if not ids:
@@ -215,7 +242,7 @@ def review_view(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     rows = {r["id"]: r for r in conn.execute(f"SELECT * FROM invoice_runs WHERE id IN ({_marks(ids)})", ids)}
     held_at = {r["run_id"]: r["ts"] for r in conn.execute(
         f"SELECT run_id, MAX(ts) AS ts FROM audit_log WHERE event = 'review.enqueued' AND run_id IN ({_marks(ids)}) "
-        "GROUP BY run_id", ids)}
+        "AND json_extract(payload_json, '$.update') IS NULL GROUP BY run_id", ids)}  # a hold's update keeps its wait
     facts, now = _run_facts(conn, ids), now_utc()
     result = []
     for review in reviews:
@@ -223,6 +250,9 @@ def review_view(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         hold = payments.review_hold(run_id, conn=conn)
         details = hold.details if hold else {}
         by_code = {f["code"]: f for f in _findings(facts[run_id])}
+        payee = details.get("payee_threshold")
+        if payee:  # the latest total, also for a run the threshold reached after it was held
+            by_code[PAYEE_CODE] = {"code": PAYEE_CODE, "severity": "WARNING", "message": payee.get("message")}
         findings = [{k: v for k, v in by_code.get(code, {"code": code}).items() if k != "evidence"}
                     for code in review["findings"]]
         payment_failed = review["kind"] == "payment_failure"
@@ -236,6 +266,8 @@ def review_view(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             "ai_recommendation": review["ai_recommendation"],
             "ai_rationale": review["ai_rationale"],
             "overpaid_usd": _money(review["overpaid"]),
+            "payee_threshold": _payee_threshold(conn, payee),
+            "pulled": review["pulled"],
             "paid_amount_usd": _money(details.get("paid_amount")),
             "waiting_since": held_at.get(run_id),
             "waiting_s": _seconds(held_at.get(run_id), now),
@@ -258,7 +290,8 @@ def invoice_detail(conn: sqlite3.Connection, run_id: str) -> dict[str, Any] | No
     if state is not None and state.findings:
         findings = [_finding(f.model_dump(mode="json")) for f in state.findings]
         known = {(f["code"], f["message"]) for f in findings}
-        findings += [f for f in map(_finding, fact["superseded"]) if (f["code"], f["message"]) not in known]
+        findings += [f for f in map(_finding, [*fact["superseded"], *fact["retroactive"][-1:]])
+                     if (f["code"], f["message"]) not in known]
     else:
         findings = _findings(fact)
 

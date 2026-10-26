@@ -116,7 +116,7 @@ def test_batch_pay_then_payments_run(seeded_db, capsys):
     assert main(["--batch", str(INVOICES), "--pay", "--json"]) == 0
     lines = _json_lines(capsys.readouterr().out)
     runs = [line for line in lines if "run_id" in line]
-    assert [r["file"] for r in runs] == sorted(p.name for p in INVOICES.iterdir())
+    assert len(runs) == 26 and [r["file"] for r in runs] == sorted(p.name for p in INVOICES.iterdir())
     [batch] = [line["batch"] for line in lines if "batch" in line]
     assert (batch["paid"], batch["total_usd"], batch["trigger"], batch["released_by"]) == (
         7, "37620.00", "pay_all", "cli")
@@ -126,7 +126,7 @@ def test_batch_pay_then_payments_run(seeded_db, capsys):
     assert seeded_db.execute("SELECT COUNT(*) FROM payments").fetchone()[0] == 7
 
     summary = Path("reports/summary.md").read_text()
-    for row in ("| Paid | 7 |", "| Superseded | 1 |", "| Held for review | 1 |", "| Rejected | 11 |",
+    for row in ("| Paid | 7 |", "| Superseded | 1 |", "| Held for review | 6 |", "| Rejected | 12 |",
                 "| Duplicates caught | 3 |", "| Paid | $37,620.00 |"):
         assert row in summary
 

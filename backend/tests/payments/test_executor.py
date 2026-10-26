@@ -11,7 +11,7 @@ from acme.payments import (BatchAlreadyRunning, InvalidBatchRequest, is_batch_ru
 from acme.payments._store import BATCH_LOCK
 from acme.models import Outcome
 from acme.settings import get_settings
-from golden_invoices import EXPECTED_OUTCOME, GOLDEN_FILES
+from golden_invoices import EXPECTED_OUTCOME, GOLDEN_FILES, PULLED
 from payment_helpers import APPROVE, approve, make_run, queue_rows, revised, run_row
 
 
@@ -183,7 +183,7 @@ def test_non_success_status_is_a_failure(pdb, golden, monkeypatch):
 
 def golden_disposition(conn, golden):
     for name in GOLDEN_FILES:
-        if EXPECTED_OUTCOME[name] != "APPROVE":
+        if EXPECTED_OUTCOME[name] != "APPROVE" or name in PULLED:  # pulled into review by a later split invoice
             continue
         invoice = golden[name]
         make_run(conn, name)

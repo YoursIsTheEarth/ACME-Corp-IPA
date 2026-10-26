@@ -120,5 +120,5 @@ def test_p1_stats_after_golden_run(api_golden):
     stats = api_golden["stats"]
     assert stats["duplicates_caught"] == 3
     assert stats["dollars_paid"] == "37620.00" and stats["dollars_queued"] == "0.00"
-    assert stats["paid_today"] == 7 and stats["rejected_today"] == 11 and stats["awaiting_review"] == 1
+    assert stats["paid_today"] == 7 and stats["rejected_today"] == 12 and stats["awaiting_review"] == 6
     assert float(stats["dollars_blocked"]) > 0

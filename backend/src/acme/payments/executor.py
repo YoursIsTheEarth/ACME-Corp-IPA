@@ -5,6 +5,7 @@
     pay_now_if_immediate()                             # delay off: an `immediate` batch of what is payable now
     recover_interrupted_batch()                        # at startup, before any batch
     resume_payment_failure(run_id, approve=True)       # decision on a payment-failure hold
+    resume_payee_hold(run_id, approve=True)            # decision on a payee-threshold hold
 """
 
 import logging
@@ -18,7 +19,8 @@ from acme.db import connect
 from acme.logging import audit
 from acme.payments import events, mock_bank
 from acme.payments._store import BATCH_LOCK, immediate, resolve_run, row_key, utcnow
-from acme.payments.queue import enqueue_review
+from acme.payments.queue import PAYEE_HOLD_REASON, enqueue_review, review_hold
+from acme.payees import set_outcome
 from acme.payments.revisions import money
 from acme.settings import get_settings
 
@@ -303,27 +305,66 @@ def resume_payment_failure(run_id: str, approve: bool, reviewer: str | None = No
         if row is None:
             raise ValueError(f"run {run_id} has no payment-failure hold")
         if not approve:
-            with immediate(conn):
-                resolve_run(conn, run_id, "Rejected", reviewer)
-            audit(run_id, AGENT, "rejection.recorded", {
-                "invoice_number": row["invoice_number"], "vendor": row["vendor"], "final_status": "Rejected",
-                "outcome": "REJECT", "rationale": rationale, "decided_by": reviewer,
-                "reason": "payment failed", "last_error": row["last_error"], "findings": [],
-            }, conn=conn)
+            _reject_hold(conn, run_id, row, reviewer, rationale, reason="payment failed",
+                         last_error=row["last_error"], findings=[])
             return None
-        with immediate(conn):
-            new_id = conn.execute(
-                "INSERT INTO payment_queue (run_id, invoice_number, revision, vendor, amount_usd, kind, status, "
-                "attempts, queued_at) VALUES (?, ?, ?, ?, ?, ?, 'queued', 0, ?)",
-                (run_id, row["invoice_number"], row["revision"], row["vendor"], row["amount_usd"], row["kind"],
-                 utcnow()),
-            ).lastrowid
-            conn.execute("UPDATE invoice_runs SET status = 'Queued for payment', stage = 'Queued for payment', "
-                         "decided_by = COALESCE(?, decided_by) WHERE id = ?", (reviewer, run_id))
-        data = {"row_id": new_id, "run_id": run_id, "invoice_number": row["invoice_number"], "kind": row["kind"],
-                "amount_usd": money(row["amount_usd"]), "vendor": row["vendor"], "requeued_from": row["id"]}
-        audit(run_id, AGENT, "payment.queued", data, conn=conn)
-        events.emit("payment.queued", data)
-        return new_id
+        return _requeue(conn, run_id, row, reviewer)
     finally:
         conn.close()
+
+
+def resume_payee_hold(run_id: str, approve: bool, reviewer: str | None = None,
+                      rationale: str | None = None) -> int | None:
+    """Decide a payee-threshold hold (a payment pulled by `apply_payee_flags`). Approve: a fresh `queued` row
+    (same kind, amount, and key), paid at once when payment delay is off. Reject: the run resolves Rejected
+    with the reviewer's rationale; nothing is queued. Returns the new row id on approve, else None.
+    """
+    hold = review_hold(run_id)
+    if hold is None or hold.kind != "payee_threshold":
+        raise ValueError(f"run {run_id} has no payee-threshold hold")
+    conn = connect()
+    try:
+        row = conn.execute("SELECT * FROM payment_queue WHERE id = ? AND run_id = ?",
+                           (hold.details.get("row_id"), run_id)).fetchone()
+        if row is None:
+            raise ValueError(f"run {run_id} has no pulled payment row")
+        if not approve:
+            threshold = hold.details.get("payee_threshold") or {}
+            _reject_hold(conn, run_id, row, reviewer, rationale, reason=PAYEE_HOLD_REASON.lower(), findings=[{
+                "code": "PAYEE_CUMULATIVE_THRESHOLD", "severity": "WARNING", "message": threshold.get("message"),
+                "evidence": {k: threshold.get(k) for k in ("payees", "total", "threshold", "window", "invoices")}}])
+            return None
+        new_id = _requeue(conn, run_id, row, reviewer)
+    finally:
+        conn.close()
+    pay_now_if_immediate()
+    return new_id
+
+
+def _reject_hold(conn: sqlite3.Connection, run_id: str, row: sqlite3.Row, reviewer: str | None,
+                 rationale: str | None, **details: Any) -> None:
+    with immediate(conn):
+        resolve_run(conn, run_id, "Rejected", reviewer)
+    audit(run_id, AGENT, "rejection.recorded", {
+        "invoice_number": row["invoice_number"], "vendor": row["vendor"], "final_status": "Rejected",
+        "outcome": "REJECT", "rationale": rationale, "decided_by": reviewer, **details,
+    }, conn=conn)
+
+
+def _requeue(conn: sqlite3.Connection, run_id: str, row: sqlite3.Row, reviewer: str | None) -> int:
+    """A fresh `queued` row (0 attempts) with `row`'s kind and amount; same idempotency key."""
+    with immediate(conn):
+        new_id = conn.execute(
+            "INSERT INTO payment_queue (run_id, invoice_number, revision, vendor, amount_usd, kind, status, "
+            "attempts, queued_at) VALUES (?, ?, ?, ?, ?, ?, 'queued', 0, ?)",
+            (run_id, row["invoice_number"], row["revision"], row["vendor"], row["amount_usd"], row["kind"],
+             utcnow()),
+        ).lastrowid
+        conn.execute("UPDATE invoice_runs SET status = 'Queued for payment', stage = 'Queued for payment', "
+                     "decided_by = COALESCE(?, decided_by) WHERE id = ?", (reviewer, run_id))
+        set_outcome(conn, run_id, "Queued for payment")
+    data = {"row_id": new_id, "run_id": run_id, "invoice_number": row["invoice_number"], "kind": row["kind"],
+            "amount_usd": money(row["amount_usd"]), "vendor": row["vendor"], "requeued_from": row["id"]}
+    audit(run_id, AGENT, "payment.queued", data, conn=conn)
+    events.emit("payment.queued", data)
+    return new_id

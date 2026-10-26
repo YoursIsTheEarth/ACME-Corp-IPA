@@ -274,8 +274,9 @@ def record_review(run_id: str, decision: str, reviewer: str, rationale: str,
 def continue_review(run_id: str, on_event: EventCallback | None = None) -> RunResult:
     """Resume a claimed (Resuming) run with its latest stored `review_decisions` row.
 
-    Payment-failure holds (whose graph already ended) go to `resume_payment_failure`; every other
-    hold resumes the paused graph, which continues to Disposition with the reviewer as the decider.
+    Payment-failure and payee-threshold holds (whose graph already ended) go to `resume_payment_failure`
+    and `resume_payee_hold`; every other hold resumes the paused graph, which continues to Disposition with
+    the reviewer as the decider.
     """
     conn = connect()
     try:
@@ -286,8 +287,9 @@ def continue_review(run_id: str, on_event: EventCallback | None = None) -> RunRe
     if row is None:
         raise ReviewConflict(run_id, "no review decision recorded")
     hold = payments.review_hold(run_id)
-    if hold is not None and hold.kind == "payment_failure":
-        payments.resume_payment_failure(run_id, row["decision"] == "approve", row["reviewer"], row["rationale"])
+    outside_graph = {"payment_failure": payments.resume_payment_failure, "payee_threshold": payments.resume_payee_hold}
+    if hold is not None and hold.kind in outside_graph:
+        outside_graph[hold.kind](run_id, row["decision"] == "approve", row["reviewer"], row["rationale"])
         return _result(run_id, run_state(run_id))
     token = on_event_var.set(on_event)
     try:
@@ -326,6 +328,7 @@ def list_reviews() -> list[dict[str, Any]]:
             "kind": hold.kind if hold else None, "reason": hold.reason if hold else None,
             "findings": details.get("findings", []), "ai_recommendation": details.get("ai_recommendation"),
             "ai_rationale": details.get("ai_rationale"), "overpaid": details.get("overpaid"),
+            "payee_threshold": details.get("payee_threshold"), "pulled": bool(details.get("pulled")),
         })
     return reviews
 

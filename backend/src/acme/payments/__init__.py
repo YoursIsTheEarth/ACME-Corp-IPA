@@ -9,8 +9,12 @@ Disposition tools (called by the workflow's Disposition node, in this order):
     supersede_original(revision_invoice, run_id)     every run with a REVISION finding, whatever the outcome
     queue_payment(run_id, invoice, decision)         APPROVE -> QueueResult (queued / revised / held)
     record_rejection(run_id, decision, findings)     REJECT -> "Rejected" or "Duplicate"
-    enqueue_review(run_id, reason, kind, details)    NEEDS_REVIEW ("warning"), "credit", "payment_failure"
+    enqueue_review(run_id, reason, kind, details)    NEEDS_REVIEW ("warning"), "credit", "payment_failure",
+                                                     "payee_threshold"
     review_hold(run_id)                              the latest hold's kind, reason, details
+    record_payee_invoice(run_id, invoice, outcome)   every outcome that has an invoice: the payee ledger
+    apply_payee_flags(run_id, finding)               PAYEE_CUMULATIVE_THRESHOLD: pull queued contributors into
+                                                     review, extend held ones, flag resolved ones (audit only)
 
 Executor:
     run_batch(trigger, released_by, ids=None)        -> BatchResult; raises BatchAlreadyRunning (409 / skip
@@ -21,6 +25,7 @@ Executor:
     immediate_scope(conn, max_attempts)              row ids an `immediate` batch would take now
     recover_interrupted_batch()                      at CLI and API startup, before any batch
     resume_payment_failure(run_id, approve, reviewer, rationale)
+    resume_payee_hold(run_id, approve, reviewer, rationale)
 
 Trigger decisions (pure; the caller passes `now`, the settings, and the admin `PaymentTiming`):
     next_batch_time(now, timing), end_of_day_due(now, last_eod_run, timing),
@@ -45,13 +50,17 @@ from acme.payments.executor import (
     is_batch_running,
     pay_now_if_immediate,
     recover_interrupted_batch,
+    resume_payee_hold,
     resume_payment_failure,
     run_batch,
 )
 from acme.payments.queue import (
     QueueResult,
     ReviewHold,
+    apply_payee_flags,
     enqueue_review,
+    payee_threshold_details,
+    record_payee_invoice,
     queue_payment,
     record_processed,
     record_rejection,
@@ -79,6 +88,7 @@ __all__ = [
     "RevisionKind",
     "RowResult",
     "RunActivity",
+    "apply_payee_flags",
     "end_of_day_due",
     "enqueue_review",
     "idle_batch_due",
@@ -88,11 +98,14 @@ __all__ = [
     "next_batch_time",
     "pay_now_if_immediate",
     "payable_count",
+    "payee_threshold_details",
     "queue_payment",
+    "record_payee_invoice",
     "record_processed",
     "record_rejection",
     "recover_interrupted_batch",
     "resolve_revision",
+    "resume_payee_hold",
     "resume_payment_failure",
     "review_hold",
     "run_batch",

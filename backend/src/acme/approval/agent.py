@@ -20,6 +20,7 @@ from acme.logging import agent_context, audit, dumps, run_context
 from acme.models import Critique, Decision, InvoiceState, Outcome
 from acme.settings import get_settings
 from acme.validation.agent import untrusted
+from acme.validation.codes import for_prompt
 
 AGENT = "approval"
 APPROVAL_PROMPT, CRITIC_PROMPT = "approval_v1", "critic_v1"
@@ -46,7 +47,7 @@ def _policy_block(policy: PolicyResult) -> str:
 
 def _common(state: InvoiceState) -> dict[str, str]:
     invoice = state.invoice.model_dump_json(indent=2, exclude_none=True) if state.invoice else "(no invoice)"
-    findings = [f.model_dump(mode="json", include={"code", "severity", "message", "evidence", "source"})
+    findings = [for_prompt(f).model_dump(mode="json", include={"code", "severity", "message", "evidence", "source"})
                 for f in state.findings]
     return {"invoice": untrusted(invoice), "findings": block("findings", findings)}
 

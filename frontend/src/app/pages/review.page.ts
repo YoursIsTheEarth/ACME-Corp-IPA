@@ -5,7 +5,7 @@ import { MatDialog } from '@angular/material/dialog';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 
-import { ReviewDecision, ReviewRow } from '../core/api.models';
+import { PayeeThreshold, ReviewDecision, ReviewRow } from '../core/api.models';
 import { DetailDrawer } from '../core/drawer';
 import { Stores } from '../core/live-store';
 import { ReviewDecisionDialog, ReviewDialogData, decisionLabel } from '../dialogs/review-decision.dialog';
@@ -41,6 +41,9 @@ import { CellDefDirective, InvoiceTableComponent, TableColumn } from '../shared/
             @if (row.hold_kind === 'credit') {
               <span class="overpaid small" data-testid="overpaid">{{ row.overpaid_usd | usd }} overpaid</span>
             }
+            @if (row.pulled) {
+              <span class="pulled small" data-testid="pulled">Pulled from Payment Queue</span>
+            }
           </div>
         </ng-template>
         <ng-template appCell="why" let-row>
@@ -55,6 +58,12 @@ import { CellDefDirective, InvoiceTableComponent, TableColumn } from '../shared/
             } @empty {
               <span class="small">{{ row.reason }}</span>
             }
+          }
+          @if (row.payee_threshold; as payee) {
+            <div class="stack payee" data-testid="payee-total">
+              <b>Payee total {{ payee.total_usd | usd }} in {{ payee.window_days }} days</b>
+              <span class="small muted" data-testid="payee-invoices">{{ invoiceNumbers(payee) }}</span>
+            </div>
           }
         </ng-template>
         <ng-template appCell="ai" let-row>
@@ -81,6 +90,8 @@ import { CellDefDirective, InvoiceTableComponent, TableColumn } from '../shared/
     .actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; min-width: 260px; }
     .reject { color: #c62828; }
     .fail, .overpaid { color: #b71c1c; font-weight: 600; }
+    .pulled { color: #e65100; font-weight: 600; }
+    .payee { margin-top: 4px; }
     .ai { max-width: 340px; }
     .clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   `,
@@ -99,11 +110,19 @@ export class ReviewPage {
       sortValue: (r) => r.invoice_number,
       searchText: (r) => `${r.invoice_number ?? ''} ${r.vendor ?? ''} ${r.amount_usd ?? ''}`,
     },
-    { key: 'why', header: "Why it's held", searchText: (r) => `${r.reason ?? ''} ${r.findings.map((f) => f.code).join(' ')}` },
+    {
+      key: 'why',
+      header: "Why it's held",
+      searchText: (r) => `${r.reason ?? ''} ${r.findings.map((f) => f.code).join(' ')} ${r.payee_threshold ? this.invoiceNumbers(r.payee_threshold) : ''}`,
+    },
     { key: 'ai', header: 'AI recommendation', sortable: true, sortValue: (r) => r.ai_recommendation, searchText: (r) => `${r.ai_recommendation} ${r.ai_rationale}` },
     { key: 'waiting', header: 'Waiting since', sortable: true, sortValue: (r) => r.waiting_since, searchText: () => '' },
     { key: 'actions', header: 'Actions', searchText: () => '' },
   ];
+
+  invoiceNumbers(payee: PayeeThreshold): string {
+    return payee.invoices.map((i) => i.invoice_number).join(', ');
+  }
 
   decide(row: ReviewRow, decision: ReviewDecision): void {
     this.dialog.open<ReviewDecisionDialog, ReviewDialogData>(ReviewDecisionDialog, { data: { row, decision }, width: '600px' });

@@ -1,5 +1,5 @@
 import { provideHttpClient } from '@angular/common/http';
-import { TestBed, discardPeriodicTasks, fakeAsync, tick } from '@angular/core/testing';
+import { TestBed, discardPeriodicTasks, fakeAsync, flush, tick } from '@angular/core/testing';
 import { provideNoopAnimations } from '@angular/platform-browser/animations';
 import { provideRouter } from '@angular/router';
 import { BehaviorSubject, of } from 'rxjs';
@@ -44,6 +44,27 @@ describe('AuditPage', () => {
       ],
     });
   });
+
+  it('keeps a paid invoice flagged after resolution Paid and lists the flag in its key findings', fakeAsync(() => {
+    const flagged: AuditRow = {
+      ...row('INV-1018', 'Paid'),
+      key_findings: [
+        { code: 'PAYEE_CUMULATIVE_THRESHOLD', severity: 'WARNING', message: 'Payee total $19,250.00' },
+        { code: 'NEAR_THRESHOLD', severity: 'INFO', message: 'Just under the VP threshold' },
+      ],
+      findings_count: 2,
+    };
+    TestBed.overrideProvider(ApiClient, { useValue: { audit: () => of({ view: 'audit', rows: [flagged], count: 1, server_time: '' }) } });
+    const fixture = TestBed.createComponent(AuditPage);
+    fixture.detectChanges();
+    tick();
+    fixture.detectChanges();
+    const el: HTMLElement = fixture.nativeElement;
+    expect(Array.from(el.querySelectorAll('.chip')).map((c) => c.getAttribute('data-status'))).toEqual(['Paid']);
+    expect(Array.from(el.querySelectorAll('.finding-chip')).map((c) => c.textContent!.trim())).toContain('Payee cumulative threshold');
+    flush();
+    discardPeriodicTasks();
+  }));
 
   it('offers Revised in the status filter, filters by it, and gives it its own chip', fakeAsync(() => {
     expect(FINAL_STATUSES).toEqual(['Paid', 'Revised', 'Rejected', 'Duplicate', 'Superseded', 'Credit confirmed']);

@@ -16,7 +16,8 @@ EXPECTED = {
     "invoice_1009.json": "json", "invoice_1010.txt": "txt", "invoice_1011.pdf": "pdf",
     "invoice_1011.txt": "txt", "invoice_1012.pdf": "pdf", "invoice_1012.txt": "txt",
     "invoice_1013.json": "json", "invoice_1013.pdf": "pdf", "invoice_1014.xml": "xml",
-    "invoice_1015.csv": "csv", "invoice_1016.json": "json",
+    "invoice_1015.csv": "csv", "invoice_1016.json": "json", "invoice_1017.txt": "txt", "invoice_1018.txt": "txt",
+    "invoice_1019.json": "json", "invoice_1020.csv": "csv", "invoice_1021.txt": "txt", "invoice_1022.json": "json",
 }
 
 

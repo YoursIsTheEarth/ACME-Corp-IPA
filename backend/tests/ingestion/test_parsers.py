@@ -75,13 +75,13 @@ def test_xml_euro_invoice():
 
 
 def test_structured_files_make_no_llm_calls(db):
-    assert len(STRUCTURED) == 10
+    assert len(STRUCTURED) == 13
     for name in STRUCTURED:
         result = ingest(INVOICES / name, run_id=f"r-{name}")
         assert result.extracted is not None and result.attempts == 1, name
     assert db.execute("SELECT count(*) FROM llm_calls").fetchone()[0] == 0
     rows = db.execute("SELECT agent, event FROM audit_log").fetchall()
-    assert len(rows) == 10 and {tuple(r) for r in rows} == {("ingestion", "extraction_attempt")}
+    assert len(rows) == 13 and {tuple(r) for r in rows} == {("ingestion", "extraction_attempt")}
 
 
 def test_csv_quoted_numbers_with_thousands_separators(seeded_db):

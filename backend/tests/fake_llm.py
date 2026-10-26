@@ -133,7 +133,7 @@ def install(monkeypatch) -> None:
 
 
 # --- Extraction: regexes for the text layouts in the sample data ---------------------------
-# Handles labelled lines (also typo labels such as `Vndr`, `Itms`, `Amt`, and two labels on
+# Handles labelled lines (a `Remit To:` line is the vendor address; also typo labels such as `Vndr`, `Itms`, `Amt`, and two labels on
 # one line), `qty:`/`@` item lines, `- Name xN $P each` email lines, and fixed-width
 # `Qty Rate/Price Amount` tables. Like a real model it transcribes values as printed and
 # leaves cleanup to the normalizer.
@@ -145,6 +145,7 @@ _LABELS = [
     ("invoice_date", r"(?:date|dt)\s*:"),
     ("vendor_name", r"(?:vendor|vndr)\s*:"),
     ("from", r"from\s*:"),
+    ("vendor_address", r"remit\s+to\s*:"),
     ("subtotal", r"sub\s*total\s*:"),
     ("tax", r"(?:sales\s+)?tax(?:\s*\([^)]*\))?\s*:"),
     ("shipping", r"shipping\s*:"),

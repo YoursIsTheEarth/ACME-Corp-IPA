@@ -11,7 +11,7 @@ from fakes import ScriptedToolModel, tool_calls
 from golden_invoices import EXPECTED_OUTCOME, GOLDEN, GOLDEN_FILES, assessed, record_processed
 
 CHECK_TOOLS = ["lookup_item", "check_stock", "reconcile_math", "check_integrity", "check_duplicate",
-               "check_vendor", "fraud_signals", "check_prices"]
+               "check_payee_threshold", "check_vendor", "detect_prompt_injection", "fraud_signals", "check_prices"]
 
 
 def state_for(invoice, run_id="r-test", findings=()):
@@ -155,4 +155,4 @@ def test_revision_context_on_state_and_audit(seeded_db, golden):
 def test_prompt_version_logged(ctx, golden, seeded_db):
     run_validation(state_for(golden["invoice_1001.txt"], run_id="r-pv"), ctx)
     rows = seeded_db.execute("SELECT agent, prompt_version, provider FROM llm_calls WHERE run_id='r-pv'").fetchall()
-    assert [tuple(r) for r in rows] == [("validation", "validation_v1", "fake")] * 2
+    assert [tuple(r) for r in rows] == [("validation", "validation_v2", "fake")] * 2

@@ -21,7 +21,7 @@ from acme.validation.context import ValidationContext
 from acme.validation.tools import ToolRun, build_tools, run_check
 
 AGENT = "validation"
-PROMPT_VERSION = "validation_v1"
+PROMPT_VERSION = "validation_v2"
 PROMPTS_DIR = Path(__file__).resolve().parents[3] / "prompts"
 START, END = "<untrusted_invoice>", "</untrusted_invoice>"
 _USER_SPLIT = "\n---- user ----\n"
@@ -90,7 +90,7 @@ def run_validation(state: InvoiceState, ctx: ValidationContext | None = None) ->
     ctx = ctx or ValidationContext.load()
     run = ToolRun()
     with run_context(state.run_id), agent_context(AGENT):
-        ctx = dataclasses.replace(ctx, address_assessment=assess_address(invoice))
+        ctx = dataclasses.replace(ctx, raw_text=state.raw_text, address_assessment=assess_address(invoice))
         _agent_loop(state, invoice, ctx, run)
         swept = [name for name in checks.CHECKS if name not in run.results]
         for name in swept:

@@ -1,0 +1,17 @@
+INVOICE
+
+Vendor: Harbor Point Supply Co.
+Remit To: 88 Harbor View Rd, Unit 4, Tacoma, WA 98402
+Invoice Number: INV-1021
+Date: 2026-02-03
+Due Date: 2026-03-05
+
+Items:
+  WidgetB    qty: 10    unit price: $500.00
+  WidgetA    qty: 4     unit price: $250.00
+
+Subtotal: $6,000.00
+Tax (0%): $0.00
+Total Amount: $6,000.00
+
+Payment Terms: Net 30

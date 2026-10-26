@@ -181,6 +181,74 @@ def check_duplicate(invoice: Invoice, ctx: ValidationContext) -> list[Finding]:
     return detect_duplicate(invoice, ctx)[0]
 
 
+def check_payee_threshold(invoice: Invoice, ctx: ValidationContext) -> list[Finding]:
+    """PAYEE_CUMULATIVE_THRESHOLD when the payee's invoices in the largest rolling window that includes this one
+    (at least two invoice numbers, each at its latest revision, rejected ones included) total more than
+    `PAYEE_CUMULATIVE_THRESHOLD_USD`. Duplicates are skipped: their original already counts."""
+    if ctx.payee_lookup is None or any(f.code == C.DUPLICATE for f in check_duplicate(invoice, ctx)):
+        return []
+    result = ctx.payee_lookup(invoice)
+    threshold = get_settings().payee_cumulative_threshold_usd
+    if result is None or len({m.invoice_number for m in result.members}) < 2 or result.total <= threshold:
+        return []
+    invoices = [{"invoice_number": m.invoice_number, "revision": m.revision, "vendor_name": m.vendor_name,
+                 "invoice_date": m.invoice_date.isoformat(), "total": _money(m.total),
+                 "outcome": m.outcome or "Current", "run_id": m.run_id} for m in result.members]
+    return [finding(C.PAYEE_CUMULATIVE_THRESHOLD,
+                    f"Payee total ${result.total:,.2f} over {len(invoices)} invoices in {result.days} days "
+                    f"({result.start} to {result.end}) exceeds ${threshold:,.2f}",
+                    payees=list(result.payees), total=_money(result.total), threshold=_money(threshold),
+                    window={"days": result.days, "start": result.start.isoformat(), "end": result.end.isoformat()},
+                    invoices=invoices)]
+
+
+# --- prompt injection -------------------------------------------------------------------
+
+# Text aimed at the processing system rather than at a person (design D5), each named for the evidence.
+# Not matched: urgency ("URGENT", "pay immediately"), "please remit", "process at your earliest convenience".
+_INJECTION = {name: re.compile(pattern, re.IGNORECASE | re.MULTILINE) for name, pattern in {
+    "ignore_instructions": r"\b(?:ignore|disregard|forget|override)\b[^.\n]{0,40}?\b(?:previous|prior|above|all|any)\b"
+                           r"[^.\n]{0,40}?\b(?:instructions?|rules|prompts?|checks)\b",
+    "role_marker": r"^[ \t]*(?:system|assistant|developer)[ \t]*(?:override|prompt|message)?[ \t]*:"
+                   r"|\bsystem\s+override\b",
+    "agent_address": r"\bnote\s+to\s+(?:the\s+)?(?:ai|assistant|agent|model|reviewer|validator)\b",
+    "approval_command": r"\b(?:approve|auto-approve|pay)\s+(?:this|the)\s+invoice\b"
+                        r"|\bmark\b[^.\n]{0,40}?\bas\s+(?:validated|approved|verified|in\s+stock|paid)\b",
+    "fake_verdict": r"\b(?:validation|verification)\s+(?:passed|complete|succeeded)\b"
+                    r"|\b(?:critic|vp|reviewer)\s*:\s*(?:pass|approved?)\b|\"outcome\"\s*:\s*\"approve\"",
+    "skip_checks": r"\b(?:skip|bypass|disable)\s+(?:the\s+)?(?:validation|review|checks|critic)\b",
+    "delimiter_spoof": r"INVOICE_DATA|<<<\s*DATA\b|\bDATA\s*>>>|</?\s*(?:system|instructions?|untrusted_invoice)\s*>",
+}.items()}
+EXCERPT_CHARS = 120
+
+
+def _excerpt(text: str, start: int) -> str:
+    """The match to the end of its line, whitespace collapsed, at most `EXCERPT_CHARS`."""
+    end = text.find("\n", start)
+    return " ".join(text[start:end if end != -1 else len(text)].split())[:EXCERPT_CHARS]
+
+
+def detect_prompt_injection(invoice: Invoice, ctx: ValidationContext) -> list[Finding]:
+    """PROMPT_INJECTION_SUSPECTED when the document text, notes, terms, or a line description holds text
+    aimed at the agents. Evidence names the patterns and quotes the matches (the message does not)."""
+    texts = [ctx.raw_text, invoice.notes, invoice.payment_terms,
+             *(text for item in invoice.line_items for text in (item.raw_name, item.note))]
+    patterns: set[str] = set()
+    excerpts: list[str] = []
+    for text in filter(None, texts):
+        for name, pattern in _INJECTION.items():
+            for match in pattern.finditer(text):
+                patterns.add(name)
+                if (excerpt := _excerpt(text, match.start())) not in excerpts:
+                    excerpts.append(excerpt)
+    if not patterns:
+        return []
+    names = [name for name in _INJECTION if name in patterns]
+    return [finding(C.PROMPT_INJECTION_SUSPECTED,
+                    f"Invoice text addresses the processing system ({', '.join(names)}); treated as an attack",
+                    patterns=names, excerpts=excerpts)]
+
+
 # --- F11 fraud signals (P1) -----------------------------------------------------------
 
 _URGENCY = re.compile(r"\b(urgent\w*|immediately|asap|act now|penalt\w*|final notice)\b", re.IGNORECASE)
@@ -212,6 +280,8 @@ def fraud_score(invoice: Invoice, ctx: ValidationContext) -> tuple[float, list[s
         "unknown_vendor": bool(check_vendor(invoice, ctx)),
         "suspicious_address": implausible_address(ctx),
         "near_threshold": near_threshold(invoice),
+        "payee_cumulative": bool(check_payee_threshold(invoice, ctx)),
+        "prompt_injection": bool(detect_prompt_injection(invoice, ctx)),
     }
     weights = get_settings().fraud_signal_weights
     signals = [name for name, hit in present.items() if hit]
@@ -271,7 +341,9 @@ CHECKS = {
     "reconcile_math": reconcile_math,
     "check_integrity": check_integrity,
     "check_duplicate": check_duplicate,
+    "check_payee_threshold": check_payee_threshold,
     "check_vendor": check_vendor,
+    "detect_prompt_injection": detect_prompt_injection,
     "fraud_signals": fraud_signals,
     "check_prices": check_prices,
 }

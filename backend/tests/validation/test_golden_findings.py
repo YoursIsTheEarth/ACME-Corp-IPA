@@ -1,4 +1,4 @@
-"""Deterministic checks over all 20 golden files, in sorted filename order (tasks 2.6, 6.5)."""
+"""Deterministic checks over all 26 golden files, in sorted filename order (tasks 2.6, 6.5)."""
 
 import pytest
 

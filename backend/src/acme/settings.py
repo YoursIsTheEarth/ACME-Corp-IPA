@@ -50,8 +50,14 @@ class Settings(BaseSettings):
         "unknown_vendor": 0.20,
         "suspicious_address": 0.30,
         "near_threshold": 0.10,
+        "payee_cumulative": 0.25,
+        "prompt_injection": 0.60,
     }
     fraud_threshold: float = 0.60
+
+    # Payee registry: cumulative payee total over a rolling window
+    payee_window_days: int = 30
+    payee_cumulative_threshold_usd: Decimal = Decimal("10000.00")
 
     # Approval
     vp_review_threshold_usd: Decimal = Decimal("10000.00")

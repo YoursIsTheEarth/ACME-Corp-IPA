@@ -40,6 +40,8 @@ function reviewRow(partial: Partial<ReviewRow> = {}): ReviewRow {
     ai_rationale: 'Confirm the price with the vendor.',
     overpaid_usd: null,
     paid_amount_usd: null,
+    payee_threshold: null,
+    pulled: false,
     waiting_since: null,
     waiting_s: 3,
     ...partial,
@@ -169,6 +171,24 @@ describe('dialogs', () => {
       TestBed.inject(MAT_DIALOG_DATA).decision = 'reject';
       const reject = TestBed.createComponent(ReviewDecisionDialog);
       expect(reject.componentInstance.label).toBe('Reject revision');
+    });
+  });
+
+  describe('ReviewDecisionDialog on a payee threshold hold', () => {
+    it('approving a pulled invoice returns it to the Payment Queue', () => {
+      api.submitReview.and.returnValue(of({ id: 'run-1018', decision: 'approve', reviewer: 'Dana', status: 'Resuming' }));
+      const row = reviewRow({
+        id: 'run-1018', invoice_number: 'INV-1018', hold_kind: 'payee_threshold', reason: 'Payee cumulative threshold',
+        pulled: true, findings: [{ code: 'PAYEE_CUMULATIVE_THRESHOLD', severity: 'WARNING', message: 'Payee total $29,000.00' }],
+      });
+      const f = setup(ReviewDecisionDialog, { row, decision: 'approve' });
+      expect(f.componentInstance.label).toBe('Approve');
+      type(f, '[data-testid=name-input]', 'Dana');
+      type(f, '[data-testid=rationale]', 'Three separate purchase orders confirmed');
+      confirmButton(f).click();
+      expect(api.submitReview).toHaveBeenCalledWith('run-1018', jasmine.objectContaining({ decision: 'approve' }));
+      expect(refreshed).toEqual(jasmine.arrayContaining(['review', 'paymentQueue']));
+      expect(toasts[0]).toContain('INV-1018 approved by Dana; it is now in the Payment Queue');
     });
   });
 
