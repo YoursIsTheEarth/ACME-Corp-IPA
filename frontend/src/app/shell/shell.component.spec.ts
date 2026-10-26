@@ -69,9 +69,9 @@ describe('ShellComponent', () => {
     expect(labels).toEqual([
       'Home',
       'Invoice Queue',
-      'Invoice Resolution Audit',
-      'Invoice Elevated Review',
       'Payment Queue',
+      'Invoice Elevated Review',
+      'Invoice Resolution Audit',
       'Payments',
     ]);
   });
@@ -124,6 +124,8 @@ describe('ShellComponent', () => {
     const rail = el.querySelector('[data-testid=rail]')!;
     expect(rail).not.toBeNull();
     expect(rail.querySelectorAll('.nav a').length).toBe(6);
+    const railPaths = Array.from(rail.querySelectorAll('.nav a')).map((a) => a.getAttribute('data-testid'));
+    expect(railPaths).toEqual(['nav-/', 'nav-/queue', 'nav-/payment-queue', 'nav-/review', 'nav-/audit', 'nav-/payments']);
     expect(rail.querySelector('[matListItemTitle]')).toBeNull(); // icons only
 
     (el.querySelector('[data-testid=menu-toggle]') as HTMLElement).click();

@@ -32,9 +32,9 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { path: '/', label: 'Home', icon: 'home' },
   { path: '/queue', label: 'Invoice Queue', icon: 'inbox', badge: 'in_queue' },
-  { path: '/audit', label: 'Invoice Resolution Audit', icon: 'fact_check' },
-  { path: '/review', label: 'Invoice Elevated Review', icon: 'gavel', badge: 'awaiting_review' },
   { path: '/payment-queue', label: 'Payment Queue', icon: 'request_quote', badge: 'payment_queue' },
+  { path: '/review', label: 'Invoice Elevated Review', icon: 'gavel', badge: 'awaiting_review' },
+  { path: '/audit', label: 'Invoice Resolution Audit', icon: 'fact_check' },
   { path: '/payments', label: 'Payments', icon: 'payments' },
 ];
 
