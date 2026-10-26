@@ -1,5 +1,6 @@
 """`ingest(path)`: the single ingestion entry point (F1-F4). It never raises for bad input."""
 
+import re
 from pathlib import Path
 
 from acme.ingestion.llm_extract import check_line_sum, llm_extract
@@ -31,6 +32,16 @@ def _read(path: Path, fmt: str) -> str:
     return path.read_bytes().decode("utf-8-sig", errors="replace")
 
 
+_DUE_LINE = re.compile(r"^\s*Due(?:\s+Date)?\s*:\s*(\S.*?)\s*$", re.IGNORECASE | re.MULTILINE)
+
+
+def _printed_due_date(extracted: ExtractedInvoice, text: str) -> ExtractedInvoice:
+    """The LLM may leave a worded due date ("yesterday") null; copy a printed "Due Date:" value as found."""
+    if extracted.due_date is None and (match := _DUE_LINE.search(text)):
+        return extracted.model_copy(update={"due_date": match.group(1)})
+    return extracted
+
+
 def _extract_with_llm(run_id: str | None, text: str, fmt: str) -> tuple[ExtractedInvoice | None, int, str | None]:
     """F4 loop: up to `extraction_max_retries` retries, each fed the previous error."""
     error = None
@@ -44,7 +55,7 @@ def _extract_with_llm(run_id: str | None, text: str, fmt: str) -> tuple[Extracte
             _attempt(run_id, attempt, fmt, error)
             continue
         _attempt(run_id, attempt, fmt, "accepted")
-        return extracted, attempt, None
+        return _printed_due_date(extracted, text), attempt, None
     return None, attempts, error
 
 

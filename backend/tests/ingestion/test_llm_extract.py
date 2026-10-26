@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
@@ -182,3 +183,17 @@ def test_commas_in_numbers_need_no_retry(seeded_db, stub_model, text_file):
     assert result.extracted.line_items[0].quantity == 1200
     invoice, _ = normalize(result.extracted)
     assert invoice.total == Decimal("15000.00") and invoice.line_items[0].quantity == 1200
+
+
+def test_worded_due_date_left_null_by_the_model_is_copied_from_the_text(db, stub_model, tmp_path):
+    path = tmp_path / "inv.txt"
+    path.write_text("Invoice Number: INV-1003\nDate: 2026-01-20\nDue Date: yesterday\nTotal: $1.00\n")
+    stub_model({**VALID, "due_date": None})
+    assert ingest(path).extracted.due_date == "yesterday"
+
+
+def test_due_date_found_by_the_model_is_kept(db, stub_model, tmp_path):
+    path = tmp_path / "inv.txt"
+    path.write_text("Due Date: Feb 1, 2026\n")
+    stub_model({**VALID, "due_date": "2026-02-01"})
+    assert ingest(path).extracted.due_date == date(2026, 2, 1)
