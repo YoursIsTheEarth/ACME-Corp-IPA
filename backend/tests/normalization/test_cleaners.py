@@ -23,6 +23,7 @@ def test_fix_ocr(raw, fixed):
 def test_ocr_repaired_values_parse():
     assert parse_date(fix_ocr("26-Jan-2O26")) == date(2026, 1, 26)
     assert parse_money(fix_ocr("$3,500.O0")) == Decimal("3500.00")
+    assert parse_money(fix_ocr("$3500.O0")) == Decimal("3500.00")  # extraction.v2 drops the comma
 
 
 @pytest.mark.parametrize("raw, expected", [
@@ -49,6 +50,7 @@ def test_parse_date_refuses(raw):
 
 @pytest.mark.parametrize("raw, expected", [
     ("$15,000.00", Decimal("15000.00")),
+    ("1,234,567.89", Decimal("1234567.89")),
     (" $750 ", Decimal("750.00")),
     (Decimal("-250.00"), Decimal("-250.00")),
     (-250.0, Decimal("-250.00")),

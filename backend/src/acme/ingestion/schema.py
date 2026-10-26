@@ -5,10 +5,11 @@ raw strings (OCR noise and all), the invoice number is free text, and SKUs are u
 The normalizer turns it into the strict canonical `Invoice`.
 """
 
+import re
 from datetime import date
 from decimal import Decimal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from acme.models import Finding, Invoice, LineItem
 
@@ -18,6 +19,13 @@ Money = Decimal | str
 class ExtractedLineItem(LineItem):
     unit_price: Money | None = None
     amount: Money | None = None
+
+    @field_validator("quantity", mode="before")
+    @classmethod
+    def _strip_thousands_separators(cls, value):
+        if isinstance(value, str) and re.fullmatch(r"-?\d{1,3}(,\d{3})+", value.strip()):
+            return value.replace(",", "")
+        return value
 
 
 class ExtractedInvoice(Invoice):

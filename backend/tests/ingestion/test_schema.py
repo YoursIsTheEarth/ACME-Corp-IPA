@@ -35,6 +35,18 @@ def test_non_numeric_quantity_is_a_schema_error():
         ExtractedInvoice(invoice_number="1", total="1", line_items=[{"raw_name": "x", "quantity": "lots"}])
 
 
+@pytest.mark.parametrize("raw, expected", [("1,200", 1200), ("-1,200", -1200), ("1,234,567", 1234567), (12, 12)])
+def test_quantity_thousands_separators_are_ignored(raw, expected):
+    inv = ExtractedInvoice(invoice_number="1", total="1", line_items=[{"raw_name": "x", "quantity": raw}])
+    assert inv.line_items[0].quantity == expected
+
+
+@pytest.mark.parametrize("raw", ["twelve", "1,2", "12,00"])
+def test_quantity_with_bad_commas_is_still_a_schema_error(raw):
+    with pytest.raises(ValidationError, match="quantity"):
+        ExtractedInvoice(invoice_number="1", total="1", line_items=[{"raw_name": "x", "quantity": raw}])
+
+
 def test_ingestion_result_retries():
     assert IngestionResult(attempts=2).retries == 1
     assert IngestionResult().retries == 0

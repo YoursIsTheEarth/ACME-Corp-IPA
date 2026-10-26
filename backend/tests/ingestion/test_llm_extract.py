@@ -9,6 +9,7 @@ from acme.ingestion.offline import _offline_extraction
 from acme.llm import register_handler
 from acme.logging import read_trace
 from acme.models import FindingCode, Severity
+from acme.normalization import normalize
 from acme.normalization.cleaners import fix_ocr, parse_money
 
 INVOICES = Path(__file__).resolve().parents[3] / "data" / "invoices"
@@ -60,7 +61,7 @@ def test_offline_extraction(db, name, fmt, number, vendor, lines, subtotal, tota
     assert money(inv.subtotal) == (Decimal(subtotal) if subtotal else None)
     assert money(inv.total) == Decimal(total)
     [call] = db.execute("SELECT agent, provider, prompt_version FROM llm_calls").fetchall()
-    assert tuple(call) == ("ingestion", "offline", "extraction.v1")
+    assert tuple(call) == ("ingestion", "offline", "extraction.v2")
 
 
 def test_1010_tax_shipping_and_dates(db):
@@ -171,3 +172,15 @@ def test_retries_exhausted_fail_closed(db, stub_model, text_file):
     assert len([t for t in read_trace("r-fail") if t["agent"] == "ingestion"]) == 3
     assert db.execute("SELECT count(*) FROM llm_calls WHERE run_id = 'r-fail'").fetchone()[0] == 3
     json.dumps(result.model_dump(mode="json"))  # serializable for the workflow state
+
+
+def test_commas_in_numbers_need_no_retry(seeded_db, stub_model, text_file):
+    with_commas = {"invoice_number": "INV-1", "vendor_name": "V", "total": "$15,000.00",
+                   "line_items": [{"raw_name": "WidgetA", "quantity": "1,200", "unit_price": "$12.50",
+                                   "amount": "$15,000.00"}]}
+    stub_model(with_commas)
+    result = ingest(text_file)
+    assert result.findings == [] and result.retries == 0
+    assert result.extracted.line_items[0].quantity == 1200
+    invoice, _ = normalize(result.extracted)
+    assert invoice.total == Decimal("15000.00") and invoice.line_items[0].quantity == 1200

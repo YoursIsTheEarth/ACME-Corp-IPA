@@ -10,7 +10,7 @@ from acme.ingestion.schema import ExtractedInvoice
 from acme.llm import get_chat_model
 from acme.normalization.cleaners import fix_ocr, parse_money
 
-PROMPT_VERSION = "extraction.v1"
+PROMPT_VERSION = "extraction.v2"
 PROMPTS_DIR = Path(__file__).resolve().parents[3] / "prompts"
 START_MARKER, END_MARKER = "<<<INVOICE_DATA", "INVOICE_DATA>>>"
 _USER_SPLIT = "\n---- user ----\n"

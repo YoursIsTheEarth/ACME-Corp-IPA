@@ -5,6 +5,7 @@ import pytest
 
 from acme.ingestion import ingest
 from acme.ingestion.parsers import parse_csv, parse_json, parse_xml
+from acme.normalization import normalize
 
 INVOICES = Path(__file__).resolve().parents[3] / "data" / "invoices"
 STRUCTURED = sorted(p.name for p in INVOICES.iterdir() if p.suffix in (".json", ".csv", ".xml"))
@@ -81,6 +82,14 @@ def test_structured_files_make_no_llm_calls(db):
     assert db.execute("SELECT count(*) FROM llm_calls").fetchone()[0] == 0
     rows = db.execute("SELECT agent, event FROM audit_log").fetchall()
     assert len(rows) == 10 and {tuple(r) for r in rows} == {("ingestion", "extraction_attempt")}
+
+
+def test_csv_quoted_numbers_with_thousands_separators(seeded_db):
+    inv = parse_csv('Invoice Number,Item,Qty,Unit Price,Line Total\n'
+                    'INV-1,WidgetA,"1,200",12.50,"15,000.00"\n,,,Total:,"15,000.00"\n')
+    assert inv.line_items[0].quantity == 1200
+    invoice, _ = normalize(inv)
+    assert invoice.total == Decimal("15000.00") and invoice.line_items[0].amount == Decimal("15000.00")
 
 
 @pytest.mark.parametrize("text", ["field,value\nitem,WidgetA\nquantity,many\ntotal,1\n"])
